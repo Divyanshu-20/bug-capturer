@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=400, height=500">
+  <title>Bug Capturer Controller</title>
+  <style>
+    html, body {
+      width: 400px !important;
+      min-width: 400px !important;
+      max-width: 400px !important;
+      height: 500px !important;
+      min-height: 500px !important;
+      margin: 0;
+      padding: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      background: #f8fafc;
+      color: #1f2937;
+      box-sizing: border-box;
+      overflow-x: hidden;
+    }
+    
+    /* Force popup dimensions */
+    body {
+      position: fixed;
+      top: 0;
+      left: 0;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    
+    .header h1 {
+      margin: 0 0 2px 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    .security-note {
+      background: #eff6ff;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      margin-bottom: 6px;
+      border-left: 2px solid #3b82f6;
+      color: #1e40af;
+    }
+    
+    .main-controls {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    
+    .search-section {
+      margin-bottom: 12px;
+    }
+    
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-start;
+    }
+    
+    /* Responsive design for smaller screens */
+    @media (max-width: 360px) {
+      .main-controls {
+        flex-direction: column;
+        gap: 6px;
+      }
+      
+      .action-buttons {
+        flex-direction: column;
+        gap: 6px;
+      }
+      
+      .activation-btn {
+        font-size: 12px;
+        padding: 8px 12px;
+      }
+      
+      .control-btn, .action-btn {
+        font-size: 11px;
+        padding: 8px 10px;
+        min-width: 60px;
+      }
+    }
+    
+    button {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+      min-height: 32px;
+      min-width: 32px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    
+    button:focus {
+      outline: 2px solid #3b82f6;
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    }
+    
+    button:focus:not(:focus-visible) {
+      outline: none;
+      box-shadow: none;
+    }
+    
+    button::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s ease;
+    }
+    
+    button:hover::before {
+      left: 100%;
+    }
+    
+    button:hover {
+      background: #e2e8f0;
+      color: #475569;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    button:active {
+      transform: translateY(-1px);
+      transition: transform 0.1s ease;
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    button.disabled {
+      background: #f8fafc;
+      color: #94a3b8;
+      cursor: not-allowed;
+      opacity: 0.6;
+      border-color: #f1f5f9;
+    }
+    
+    button.disabled:hover {
+      background: #f8fafc;
+      color: #94a3b8;
+    }
+    
+    .activation-btn {
+      background: #3b82f6 !important;
+      color: white !important;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 16px;
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+      border: none;
+      min-width: auto;
+      flex-shrink: 0;
+      border-radius: 8px;
+    }
+    
+    .activation-btn:hover {
+      background: #2563eb !important;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+    }
+    
+    .control-btn {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      min-height: 40px;
+      min-width: 80px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }
+    
+    .control-btn:hover:not(.disabled) {
+      background: #e2e8f0;
+      color: #475569;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .pause-btn {
+      background: #ef4444 !important;
+      color: white !important;
+      border: 1px solid #dc2626 !important;
+      font-weight: 600;
+    }
+    
+    .pause-btn:hover:not(.disabled) {
+      background: #dc2626 !important;
+      color: white !important;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+    }
+    
+    .resume-btn {
+      background: #10b981 !important;
+      color: white !important;
+      border: 1px solid #059669 !important;
+      font-weight: 600;
+    }
+    
+    .resume-btn:hover:not(.disabled) {
+      background: #059669 !important;
+      color: white !important;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    
+    .action-btn {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      min-height: 36px;
+      min-width: 70px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }
+    
+    .action-btn:hover:not(.disabled) {
+      background: #e2e8f0;
+      color: #475569;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Clear button emphasis */
+    #clear-btn {
+      background: #ef4444 !important;
+      color: white !important;
+      font-weight: 600;
+      border: none;
+    }
+    
+    #clear-btn:hover {
+      background: #dc2626 !important;
+    }
+    
+    @media (max-width: 360px) {
+      body {
+        min-width: 300px;
+        max-width: 360px;
+        padding: 8px;
+        font-size: 12px;
+      }
+      
+      .steps-container {
+        max-height: 200px;
+        padding: 8px;
+      }
+      
+      .screenshot-panel {
+        width: min(180px, calc(100vw - 16px));
+        max-width: 180px;
+      }
+    }
+    
+    /* Danger actions - small and separated */
+    .deactivation-btn {
+      background: #fef2f2 !important;
+      color: #dc2626 !important;
+      border: 1px solid #fecaca !important;
+      font-weight: 500;
+      font-size: 11px;
+      padding: 6px 10px;
+    }
+    
+    .deactivation-btn:hover {
+      background: #fee2e2 !important;
+      color: #b91c1c !important;
+      border-color: #fca5a5 !important;
+    }
+    
+
+    
+    /* Pulse animation for active test validator button */
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+      }
+      50% {
+        box-shadow: 0 6px 25px rgba(255, 107, 107, 0.6);
+      }
+      100% {
+        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+      }
+    }
+    
+    /* Border pulse animation for test validator mode indicator */
+
+    
+    .search-box {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #f9fafb;
+      color: #374151;
+      font-size: 14px;
+      transition: border-color 0.2s ease;
+      margin-bottom: 10px;
+      min-height: 48px;
+    }
+    
+    .search-box:focus {
+      outline: 2px solid #3b82f6;
+      outline-offset: 2px;
+      border-color: #3b82f6;
+      background: white;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    }
+    
+    .search-box:focus:not(:focus-visible) {
+      outline: none;
+    }
+    
+    .search-box::placeholder {
+      color: #9ca3af;
+      font-size: 12px;
+    }
+    
+    
+    .steps-section {
+      margin-bottom: 12px;
+    }
+
+    .steps-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 0 4px;
+    }
+
+    .steps-header h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .toggle-btn {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      min-height: 24px;
+      min-width: 24px;
+      transition: all 0.2s ease;
+    }
+
+    .toggle-btn:hover {
+      background: #e2e8f0;
+      color: #475569;
+    }
+
+    .steps-container {
+      max-height: 300px;
+      overflow-y: auto;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 12px;
+      box-sizing: border-box;
+      width: 100%;
+      overflow-x: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .steps-container.collapsed {
+      max-height: 0;
+      padding: 0 12px;
+      border: none;
+      overflow: hidden;
+    }
+    
+    .step-item {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+      margin: 6px 0;
+      padding: 10px 12px;
+      transition: all 0.2s ease;
+      font-size: 13px;
+    }
+    
+    .step-item:hover {
+      background: #e9ecef;
+      border-color: #007bff;
+      box-shadow: 0 1px 4px rgba(0,123,255,0.1);
+    }
+    
+    .step-clean-description {
+      color: #333;
+      line-height: 1.4;
+      font-weight: 500;
+    }
+    
+    .step-item:active {
+      transform: translateY(0);
+      transition: transform 0.1s ease;
+    }
+    
+    .step-item.error {
+      background: #fef2f2;
+      border-left: 4px solid #dc2626;
+      border-color: #fecaca;
+    }
+    
+    .step-item.warning {
+      background: #fffbeb;
+      border-left: 4px solid #d97706;
+      border-color: #fed7aa;
+    }
+    
+    .step-item.success {
+      background: #f0fdf4;
+      border-left: 4px solid #16a34a;
+      border-color: #bbf7d0;
+    }
+    
+    .step-item.console {
+      background: #eff6ff;
+      border-left: 4px solid #2563eb;
+      border-color: #bfdbfe;
+    }
+    
+    .step-item.form {
+      background: #f5f3ff;
+      border-left: 4px solid #7c3aed;
+      border-color: #c4b5fd;
+    }
+    
+    .step-item.performance {
+      background: #fefce8;
+      border-left: 4px solid #ca8a04;
+      border-color: #fde047;
+    }
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    .no-steps {
+      text-align: center;
+      color: #9ca3af;
+      padding: 40px 20px;
+      font-style: italic;
+      background: #f9fafb;
+      border-radius: 12px;
+      border: 2px dashed #d1d5db;
+    }
+    
+    .loading-skeleton {
+      background: #f3f4f6;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    
+    .loading-skeleton::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+      animation: shimmer 1.5s infinite;
+    }
+    
+    @keyframes shimmer {
+      0% { left: -100%; }
+      100% { left: 100%; }
+    }
+    
+    .skeleton-step {
+      height: 60px;
+      margin-bottom: 4px;
+    }
+    
+    .skeleton-line {
+      height: 16px;
+      margin-bottom: 8px;
+      border-radius: 4px;
+    }
+    
+    .skeleton-line.short {
+      width: 60%;
+    }
+    
+    .skeleton-line.medium {
+      width: 80%;
+    }
+    
+    .stats {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    
+    .stat-item {
+      background: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+      font-weight: 500;
+    }
+    
+    .stat-item.error { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+    .stat-item.warning { background: #fffbeb; color: #d97706; border-color: #fed7aa; }
+    .stat-item.success { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+    .stat-item.console { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+    .stat-item.performance { background: #fefce8; color: #ca8a04; border-color: #fde047; }
+    
+
+
+    /* Advanced Screenshot Widget Styles */
+    .screenshot-widget {
+      position: relative;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    
+    /* Ensure screenshot panel doesn't overflow on small screens */
+    @media (max-width: 380px) {
+      .screenshot-panel {
+        right: -8px;
+        width: min(280px, calc(100vw - 16px));
+      }
+    }
+
+    .screenshot-trigger {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      min-height: 36px;
+      min-width: 70px;
+    }
+
+    .screenshot-trigger:hover:not(.disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    .screenshot-trigger.disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .screenshot-panel {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+      width: min(320px, calc(100vw - 40px));
+      max-width: 320px;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    .screenshot-panel::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.3);
+      z-index: -1;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .screenshot-panel.active::before {
+      opacity: 1;
+    }
+
+    .screenshot-panel.active {
+      opacity: 1;
+      visibility: visible;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .screenshot-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .screenshot-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 20px;
+      color: #6b7280;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .close-btn:hover {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .screenshot-actions {
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .capture-btn {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+    }
+
+    .capture-btn:hover {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      transform: translateX(2px);
+    }
+
+    .capture-btn:active {
+      transform: translateX(0);
+      background: #e2e8f0;
+    }
+
+    .screenshot-gallery {
+      border-top: 1px solid #f3f4f6;
+    }
+
+    .gallery-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px 12px;
+    }
+
+    .gallery-header span {
+      font-weight: 500;
+      color: #374151;
+      font-size: 14px;
+    }
+
+    .clear-btn {
+      background: none;
+      border: none;
+      color: #ef4444;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .clear-btn:hover {
+      background: #fef2f2;
+    }
+
+    .gallery-grid {
+      padding: 0 20px 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+      gap: 8px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .no-screenshots {
+      text-align: center;
+      color: #9ca3af;
+      font-size: 12px;
+      padding: 20px;
+      grid-column: 1 / -1;
+    }
+
+    .screenshot-thumbnail {
+      position: relative;
+      aspect-ratio: 1;
+      border-radius: 6px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 2px solid transparent;
+    }
+    
+    .screenshot-thumbnail:hover {
+      transform: scale(1.05);
+      border-color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+    
+    .screenshot-thumbnail:active {
+      transform: scale(0.98);
+    }
+    
+    .screenshot-thumbnail.custom-screenshot {
+      border-color: #3b82f6;
+    }
+    
+    .screenshot-thumbnail.navigation-screenshot {
+      border-color: #f59e0b;
+    }
+    
+    .screenshot-thumbnail.fullpage-screenshot {
+      border-color: #10b981;
+    }
+    
+    .screenshot-thumbnail img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    .screenshot-thumbnail .thumbnail-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      padding: 8px;
+    }
+    
+    .screenshot-thumbnail:hover .thumbnail-overlay {
+      opacity: 1;
+    }
+    
+    .thumbnail-info {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: white;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    
+    .screenshot-type {
+      background: rgba(255, 255, 255, 0.2);
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .screenshot-dimensions {
+      background: rgba(0, 0, 0, 0.5);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+    
+    .screenshot-error {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .thumbnail-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .thumbnail-btn {
+      background: white;
+      border: none;
+      padding: 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s ease;
+    }
+
+    .thumbnail-btn:hover {
+      background: #f3f4f6;
+    }
+
+    /* Screenshot Modal */
+    .screenshot-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.9);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .screenshot-modal.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal-content {
+      max-width: 95vw;
+      max-height: 95vh;
+      position: relative;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+
+    .modal-content img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(0,0,0,0.7);
+      border: none;
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 8px 12px;
+      border-radius: 50%;
+      z-index: 10001;
+      transition: all 0.2s ease;
+    }
+
+    .modal-close:hover {
+      background: rgba(0,0,0,0.9);
+      transform: scale(1.1);
+    }
+
+    .modal-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0,0,0,0.7);
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 12px 16px;
+      border-radius: 50%;
+      z-index: 10001;
+      transition: all 0.2s ease;
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-nav:hover {
+      background: rgba(0,0,0,0.9);
+      transform: translateY(-50%) scale(1.1);
+    }
+
+    .modal-nav-left {
+      left: 20px;
+    }
+
+    .modal-nav-right {
+      right: 20px;
+    }
+
+    .modal-nav:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .modal-nav:disabled:hover {
+      background: rgba(0,0,0,0.7);
+      transform: translateY(-50%) scale(1);
+    }
+
+    .modal-actions {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 12px;
+      background: rgba(0,0,0,0.8);
+      padding: 8px 16px;
+      border-radius: 25px;
+      backdrop-filter: blur(10px);
+    }
+
+    .modal-btn {
+      background: rgba(255,255,255,0.9);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+
+    .modal-btn:hover {
+      background: white;
+    }
+
+    /* Custom Screenshot Selection Overlay */
+    .selection-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.3);
+      z-index: 9999;
+      cursor: crosshair;
+      user-select: none;
+    }
+
+    .selection-rectangle {
+      position: absolute;
+      border: 2px solid #3b82f6;
+      background: rgba(59, 130, 246, 0.1);
+      pointer-events: none;
+      z-index: 10000;
+    }
+
+    .selection-info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: monospace;
+      z-index: 10001;
+    }
+
+    .selection-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 12px;
+      z-index: 10001;
+    }
+
+    .selection-btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .selection-btn:hover {
+      background: #2563eb;
+      transform: translateY(-1px);
+    }
+
+    .selection-btn.cancel {
+      background: #6b7280;
+    }
+
+    .selection-btn.cancel:hover {
+      background: #4b5563;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🐛 Bug Capturer</h1>
+  </div>
+  
+  <div class="security-note">
+    🔒 This extension runs locally, no external network calls. Redaction rules applied.
+  </div>
+  
+  <!-- Main Control Buttons -->
+  <div class="main-controls">
+    <button id="activate-btn" class="activation-btn" aria-label="Activate bug capturer" title="Activate bug capturer">🚀 Activate Extension</button>
+    <button id="toggle-btn" class="control-btn resume-btn disabled" disabled aria-label="Resume recording" title="Resume recording">▶️ Resume Recording</button>
+    <button id="stop-btn" class="control-btn disabled" disabled aria-label="Stop recording" title="Stop recording">⏹️ Stop</button>
+  </div>
+
+  <!-- Action Buttons Row -->
+  <div class="action-buttons">
+    <button id="refresh-btn" class="action-btn disabled" disabled aria-label="Refresh steps" title="Refresh steps">🔄 Refresh</button>
+    <button id="export-btn" class="action-btn disabled" disabled aria-label="Export steps" title="Export steps">📤 Export</button>
+    <button id="export-word-btn" class="action-btn disabled" disabled aria-label="Export Word document" title="Export Word document">📄 Export Word</button>
+
+    <button id="clear-btn" class="action-btn disabled" disabled aria-label="Clear all steps" title="Clear all steps">🗑️ Clear</button>
+    <div id="screenshot-widget" class="screenshot-widget" style="display: none;">
+      <button id="screenshot-trigger-btn" class="action-btn screenshot-trigger disabled" disabled title="Screenshot options">
+        📸 Customized Screenshot
+      </button>
+      
+      <!-- Screenshot Widget Panel -->
+      <div id="screenshot-panel" class="screenshot-panel">
+        <div class="screenshot-header">
+          <h3>📸 Screenshot Capture</h3>
+          <button id="close-screenshot-panel" class="close-btn">×</button>
+        </div>
+        
+        <div class="screenshot-actions">
+          <button id="capture-custom-btn" class="capture-btn">
+            🎯 Custom Area
+          </button>
+          <div class="screenshot-info">
+            <p style="margin: 8px 0; font-size: 12px; color: #6b7280; text-align: center;">
+              💡 Press <strong>Enter</strong> for full screenshot
+            </p>
+          </div>
+        </div>
+        
+        <div class="screenshot-gallery" id="screenshot-gallery">
+          <div class="gallery-header">
+            <span>Recent Screenshots</span>
+            <button id="clear-screenshots" class="clear-btn">Clear All</button>
+          </div>
+          <div class="gallery-grid" id="gallery-grid">
+            <div class="no-screenshots">No screenshots yet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Search Section -->
+  <div class="search-section">
+    <input type="text" class="search-box" id="search-box" placeholder="Search steps..." aria-label="Search steps">
+  </div>
+  
+  <div class="steps-section">
+    <div class="steps-header" id="steps-header">
+      <h3>📝 Steps</h3>
+      <button id="toggle-steps" class="toggle-btn" title="Toggle steps visibility">▼</button>
+    </div>
+    <div class="steps-container" id="steps-container">
+      <div class="no-steps">No steps recorded yet. Click Refresh to load.</div>
+    </div>
+  </div>
+  
+  <div class="status" id="status">Extension Inactive - Click Activate to Start</div>
+  
+  <!-- Screenshot Modal -->
+  <div id="screenshot-modal" class="screenshot-modal">
+    <div class="modal-content">
+      <button class="modal-close" id="modal-close">×</button>
+      <button class="modal-nav modal-nav-left" id="modal-prev" title="Previous screenshot">‹</button>
+      <button class="modal-nav modal-nav-right" id="modal-next" title="Next screenshot">›</button>
+      <img id="modal-image" src="" alt="Screenshot">
+      <div class="modal-actions">
+        <button class="modal-btn" id="download-screenshot">📥 Download</button>
+        <button class="modal-btn" id="copy-screenshot">📋 Copy</button>
+        <button class="modal-btn" id="delete-screenshot">🗑️ Delete</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Word Document Generation Libraries -->
+    <script src="jszip.min.js"></script>
+    <script src="file-saver.min.js"></script>
+    <script src="docx.min.js"></script>
+  
+  <!-- Word Report Generator -->
+  <script src="word-report-generator.js"></script>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

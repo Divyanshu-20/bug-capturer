@@ -1,0 +1,474 @@
+/**
+ * Word Document Report Generator
+ * Transforms raw bug capture data into professional Microsoft Word documents
+ */
+
+class WordReportGenerator {
+  constructor() {
+    this.docx = null;
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize the docx library
+   */
+  async initialize() {
+    if (this.initialized) return;
+    
+    try {
+      // Import docx library (assumes it's loaded via CDN or bundled)
+      if (typeof docx !== 'undefined') {
+        this.docx = docx;
+      } else {
+        throw new Error('docx library not found');
+      }
+      this.initialized = true;
+    } catch (error) {
+      console.error('Failed to initialize Word generator:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Extract structured data from raw bug capture text
+   * @param {string} rawText - Raw bug capture text
+   * @param {Array} screenshots - Array of screenshot objects
+   * @param {Object} metadata - Additional metadata
+   * @returns {Object} Structured bug report data
+   */
+  extractBugData(rawText, screenshots = [], metadata = {}) {
+    const lines = rawText.split('\n');
+    const data = {
+      title: '',
+      summary: '',
+      environment: [],
+      severity: 'Medium',
+      stepsToReproduce: [],
+      expectedResult: '[Please fill in the expected behavior here]',
+      actualResult: '',
+      frequency: 'Always',
+      attachments: [],
+      reportedBy: `Bug Context Capturer - ${new Date().toLocaleString()}`,
+      url: '',
+      screenshots: screenshots || []
+    };
+
+    let currentSection = '';
+    let stepCounter = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Extract title from first meaningful line or URL
+      if (!data.title && line && !line.startsWith('📊') && !line.startsWith('#')) {
+        if (line.includes('http')) {
+          data.title = `Issue on ${this.extractDomainFromUrl(line)}`;
+          data.url = line;
+        } else if (line.length > 5) {
+          data.title = line;
+        }
+      }
+
+      // Extract URL
+      if (line.includes('http') && !data.url) {
+        data.url = line.replace(/^URL:\s*/, '');
+      }
+
+      // Extract environment information
+      if (line.includes('Browser:') || line.includes('Platform:') || 
+          line.includes('Language:') || line.includes('Screen Resolution:')) {
+        data.environment.push(line);
+      }
+
+      // Extract steps to reproduce
+      if (line.match(/^\d+\./)) {
+        stepCounter++;
+        const stepText = line.replace(/^\d+\.\s*/, '');
+        data.stepsToReproduce.push({
+          number: stepCounter,
+          text: stepText,
+          screenshots: []
+        });
+      }
+
+      // Extract actual results
+      if (line.includes('Steps performed:') || line.includes('actions recorded')) {
+        data.actualResult += line + '\n';
+      }
+    }
+
+    // Set default title if not found
+    if (!data.title) {
+      data.title = data.url ? `Issue on ${this.extractDomainFromUrl(data.url)}` : 'Bug Report';
+    }
+
+    // Map screenshots to steps
+    this.mapScreenshotsToSteps(data, screenshots);
+
+    return data;
+  }
+
+  /**
+   * Map screenshots to the closest preceding step
+   * @param {Object} data - Bug report data
+   * @param {Array} screenshots - Array of screenshots
+   */
+  mapScreenshotsToSteps(data, screenshots) {
+    if (!screenshots || screenshots.length === 0) return;
+
+    screenshots.forEach((screenshot, index) => {
+      const screenshotDesc = screenshot.description || screenshot.filename || `Screenshot ${index + 1}`;
+      
+      // Try to map to closest step based on description or timing
+      let mapped = false;
+      
+      // If screenshot description mentions a step number
+      const stepMatch = screenshotDesc.match(/step\s*(\d+)/i);
+      if (stepMatch) {
+        const stepNum = parseInt(stepMatch[1]) - 1;
+        if (data.stepsToReproduce[stepNum]) {
+          data.stepsToReproduce[stepNum].screenshots.push(screenshot);
+          mapped = true;
+        }
+      }
+
+      // If not mapped, add to attachments
+      if (!mapped) {
+        data.attachments.push(screenshot);
+      }
+    });
+  }
+
+  /**
+   * Extract domain from URL
+   * @param {string} url - Full URL
+   * @returns {string} Domain name
+   */
+  extractDomainFromUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch {
+      return url.split('/')[2] || url;
+    }
+  }
+
+  /**
+   * Convert base64 image to buffer for docx
+   * @param {string} base64Data - Base64 image data
+   * @returns {Uint8Array} Image buffer
+   */
+  base64ToBuffer(base64Data) {
+    // Validate input
+    if (!base64Data || typeof base64Data !== 'string') {
+      throw new Error('Invalid base64 data provided');
+    }
+    
+    // Remove data URL prefix if present
+    const base64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  /**
+   * Generate Word document from bug data
+   * @param {Object} bugData - Structured bug report data
+   * @returns {Promise<Blob>} Word document blob
+   */
+  async generateWordDocument(bugData) {
+    await this.initialize();
+
+    const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun } = this.docx;
+
+    // Create document with proper styling
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: "Calibri",
+              size: 22 // 11pt = 22 half-points
+            }
+          }
+        }
+      },
+      sections: []
+    });
+
+    const children = [];
+
+    // Title (Heading 1)
+    children.push(
+      new Paragraph({
+        text: bugData.title,
+        heading: HeadingLevel.HEADING_1,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Summary
+    if (bugData.summary) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: "Summary", bold: true, size: 24 })
+          ],
+          spacing: { before: 240, after: 120 }
+        }),
+        new Paragraph({
+          text: bugData.summary,
+          spacing: { after: 240 }
+        })
+      );
+    }
+
+    // Environment (bullet list)
+    if (bugData.environment.length > 0) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: "Environment", bold: true, size: 24 })
+          ],
+          spacing: { before: 240, after: 120 }
+        })
+      );
+
+      bugData.environment.forEach(envItem => {
+        children.push(
+          new Paragraph({
+            text: `• ${envItem}`,
+            spacing: { after: 60 }
+          })
+        );
+      });
+    }
+
+    // Severity/Priority
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Severity/Priority", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      }),
+      new Paragraph({
+        text: bugData.severity,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Steps to Reproduce (numbered list with embedded screenshots)
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Steps to Reproduce", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      })
+    );
+
+    for (const step of bugData.stepsToReproduce) {
+      children.push(
+        new Paragraph({
+          text: `${step.number}. ${step.text}`,
+          spacing: { after: 120 }
+        })
+      );
+
+      // Embed screenshots for this step
+      for (const screenshot of step.screenshots) {
+        try {
+          const imageData = screenshot.data || screenshot.dataUrl;
+          
+          children.push(
+            new Paragraph({
+              children: [new ImageRun({
+                data: imageData,
+                transformation: {
+                  width: 600,
+                  height: 400
+                }
+              })],
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 120 }
+            })
+          );
+        } catch (error) {
+          console.warn('Failed to embed screenshot:', error);
+          children.push(
+            new Paragraph({
+              text: `[Screenshot: ${screenshot.filename || 'Image'}]`,
+              spacing: { after: 120 }
+            })
+          );
+        }
+      }
+    }
+
+    // Expected Result
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Expected Result", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      }),
+      new Paragraph({
+        text: bugData.expectedResult,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Actual Result
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Actual Result", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      }),
+      new Paragraph({
+        text: bugData.actualResult || '[Please describe what actually happened and any error messages or unexpected behavior]',
+        spacing: { after: 240 }
+      })
+    );
+
+    // Frequency/Reproducibility
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Frequency/Reproducibility", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      }),
+      new Paragraph({
+        text: bugData.frequency,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Attachments (unmapped screenshots)
+    if (bugData.attachments.length > 0) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: "Attachments", bold: true, size: 24 })
+          ],
+          spacing: { before: 240, after: 120 }
+        })
+      );
+
+      for (const attachment of bugData.attachments) {
+        try {
+          // Validate attachment data
+          const imageData = attachment.data || attachment.dataUrl;
+          if (!imageData) {
+            throw new Error('No image data found in attachment');
+          }
+          
+          children.push(
+            new Paragraph({
+              children: [new ImageRun({
+                data: imageData,
+                transformation: {
+                  width: 600,
+                  height: 400
+                }
+              })],
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 120 }
+            })
+          );
+        } catch (error) {
+          console.warn('Failed to embed attachment:', error);
+          children.push(
+            new Paragraph({
+              text: `[Attachment: ${attachment.filename || 'Image'}]`,
+              spacing: { after: 120 }
+            })
+          );
+        }
+      }
+    }
+
+    // Reported by
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Reported by", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      }),
+      new Paragraph({
+        text: bugData.reportedBy,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Add children to document sections
+    doc.addSection({
+      properties: {},
+      children: children
+    });
+
+    // Generate blob (browser-compatible)
+    return await this.docx.Packer.toBlob(doc);
+  }
+
+  /**
+   * Save Word document to file
+   * @param {Blob} docBlob - Word document blob
+   * @param {string} filename - Filename for the document
+   */
+  saveDocument(docBlob, filename = 'bug-report.docx') {
+    if (typeof saveAs !== 'undefined') {
+      saveAs(docBlob, filename);
+    } else {
+      // Fallback download method
+      const url = URL.createObjectURL(docBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  /**
+   * Main method to generate and save bug report
+   * @param {string} rawBugText - Raw bug capture text
+   * @param {Array} screenshots - Array of screenshot objects
+   * @param {Object} metadata - Additional metadata
+   * @param {string} filename - Output filename
+   */
+  async generateBugReport(rawBugText, screenshots = [], metadata = {}, filename = 'bug-report.docx') {
+    try {
+      // Extract structured data
+      const bugData = this.extractBugData(rawBugText, screenshots, metadata);
+      
+      // Generate Word document
+      const docBlob = await this.generateWordDocument(bugData);
+      
+      // Save document
+      this.saveDocument(docBlob, filename);
+      
+      return { success: true, message: 'Bug report generated successfully' };
+    } catch (error) {
+      console.error('Failed to generate bug report:', error);
+      return { success: false, error: error.message };
+    }
+  }
+}
+
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = WordReportGenerator;
+} else {
+  window.WordReportGenerator = WordReportGenerator;
+}

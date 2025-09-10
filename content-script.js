@@ -1839,27 +1839,8 @@ function recordStepWithScreenshot(stepData, takeScreenshot = false) {
         const dataURL = screenshotData.dataURL || screenshotData.screenshot;
         
         if (dataURL) {
-          // Record the custom area screenshot as a step
-          const screenshotStep = {
-            type: 'screenshot',
-            time: Date.now(),
-            description: `Custom area screenshot (${width}x${height})`,
-            dataURL: dataURL,
-            timestamp: Date.now(),
-            url: window.location.href,
-            viewport: `${width}x${height}`,
-            area: { x: left, y: top, width: width, height: height },
-            sessionId: window.bcState.sessionId,
-            meta: {
-              action: 'screenshot-custom',
-              timestamp: Date.now() - window.bcState.startTime
-            }
-          };
-          
-          // Store the step
-          recordStep('screenshot-custom', null, `Custom area: ${width}x${height}px`).catch(console.error);
-          
-          // Also send to background script for storage and popup notification
+          // Send to background script for storage and popup notification
+          // (Background script already stores as step via capture-screenshot-custom command)
           try {
             const screenshotData = {
               id: Date.now(),

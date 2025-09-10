@@ -116,7 +116,10 @@ class WordReportGenerator {
   mapScreenshotsToSteps(data, screenshots) {
     if (!screenshots || screenshots.length === 0) return;
 
-    screenshots.forEach((screenshot, index) => {
+    // Sort screenshots by timestamp (first at top, latest at bottom)
+    const sortedScreenshots = screenshots.sort((a, b) => a.timestamp - b.timestamp);
+
+    sortedScreenshots.forEach((screenshot, index) => {
       const screenshotDesc = screenshot.description || screenshot.filename || `Screenshot ${index + 1}`;
       
       // Try to map to closest step based on description or timing
@@ -463,6 +466,239 @@ class WordReportGenerator {
       console.error('Failed to generate bug report:', error);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Generate TVD report with all screenshots from session
+   * @param {string} rawBugText - Raw bug capture text
+   * @param {Array} screenshots - Array of all screenshot objects from session
+   * @param {Object} metadata - Additional metadata
+   * @param {string} filename - Output filename
+   */
+  async generateTVDReport(rawBugText, screenshots = [], metadata = {}, filename = 'tvd-report.docx') {
+    try {
+      // Extract structured data
+      const bugData = this.extractTVDData(rawBugText, screenshots, metadata);
+      
+      // Generate Word document with all screenshots
+      const docBlob = await this.generateTVDWordDocument(bugData);
+      
+      // Save document
+      this.saveDocument(docBlob, filename);
+      
+      return { success: true, message: `TVD report generated successfully with ${screenshots.length} screenshots` };
+    } catch (error) {
+      console.error('Failed to generate TVD report:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Extract structured data specifically for TVD report (screenshots only)
+   * @param {string} rawText - Raw bug capture text
+   * @param {Array} screenshots - Array of all screenshot objects
+   * @param {Object} metadata - Additional metadata
+   * @returns {Object} Structured TVD report data
+   */
+  extractTVDData(rawText, screenshots = [], metadata = {}) {
+    const data = {
+      title: `TVD Report - ${metadata.url ? this.extractDomainFromUrl(metadata.url) : 'Bug Session'}`,
+      summary: `Screenshots documentation with ${screenshots.length} captured images`,
+      environment: [],
+      severity: 'Documentation',
+      stepsToReproduce: [],
+      expectedResult: 'Complete visual documentation for testing and development purposes',
+      actualResult: `Session captured ${screenshots.length} screenshots for visual documentation`,
+      frequency: 'Session-based',
+      attachments: [],
+      reportedBy: `TVD Report - ${new Date().toLocaleString()}`,
+      url: metadata.url || '',
+      screenshots: screenshots || [],
+      sessionInfo: {
+        totalScreenshots: screenshots.length,
+        totalSteps: metadata.totalSteps || 0,
+        sessionDuration: this.calculateSessionDuration(screenshots),
+        screenshotTypes: this.categorizeScreenshots(screenshots)
+      }
+    };
+
+    // Add minimal environment info for TVD
+    data.environment.push(`Total Screenshots: ${screenshots.length}`);
+    data.environment.push(`Session Duration: ${data.sessionInfo.sessionDuration}`);
+    if (metadata.browser) {
+      data.environment.push(`Browser: ${metadata.browser}`);
+    }
+    if (metadata.platform) {
+      data.environment.push(`Platform: ${metadata.platform}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Calculate session duration from screenshots
+   * @param {Array} screenshots - Array of screenshots
+   * @returns {string} Formatted duration
+   */
+  calculateSessionDuration(screenshots) {
+    if (screenshots.length === 0) return 'Unknown';
+    
+    const timestamps = screenshots
+      .map(s => s.timestamp)
+      .filter(t => t)
+      .sort((a, b) => a - b);
+    
+    if (timestamps.length < 2) return 'Unknown';
+    
+    const duration = timestamps[timestamps.length - 1] - timestamps[0];
+    const minutes = Math.floor(duration / 60000);
+    const seconds = Math.floor((duration % 60000) / 1000);
+    
+    return `${minutes}m ${seconds}s`;
+  }
+
+  /**
+   * Categorize screenshots by type
+   * @param {Array} screenshots - Array of screenshots
+   * @returns {Object} Categorized screenshot counts
+   */
+  categorizeScreenshots(screenshots) {
+    const types = {};
+    screenshots.forEach(screenshot => {
+      const type = screenshot.type || 'unknown';
+      types[type] = (types[type] || 0) + 1;
+    });
+    return types;
+  }
+
+  /**
+   * Generate TVD-specific Word document (screenshots only)
+   * @param {Object} tvdData - Structured TVD report data
+   * @returns {Promise<Blob>} Word document blob
+   */
+  async generateTVDWordDocument(tvdData) {
+    await this.initialize();
+
+    const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun } = this.docx;
+
+    // Create document with proper styling
+    const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: "Calibri",
+              size: 22 // 11pt = 22 half-points
+            }
+          }
+        }
+      },
+      sections: []
+    });
+
+    const children = [];
+
+    // Title (Heading 1)
+    children.push(
+      new Paragraph({
+        text: tvdData.title,
+        heading: HeadingLevel.HEADING_1,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Session Summary (minimal)
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Summary", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      }),
+      new Paragraph({
+        text: tvdData.summary,
+        spacing: { after: 240 }
+      })
+    );
+
+    // Environment (minimal info only)
+    if (tvdData.environment.length > 0) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: "Environment", bold: true, size: 24 })
+          ],
+          spacing: { before: 240, after: 120 }
+        })
+      );
+
+      tvdData.environment.forEach(envItem => {
+        children.push(
+          new Paragraph({
+            text: `• ${envItem}`,
+            spacing: { after: 60 }
+          })
+        );
+      });
+    }
+
+    // Screenshots Section (main content)
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Screenshots", bold: true, size: 24 })
+        ],
+        spacing: { before: 240, after: 120 }
+      })
+    );
+
+    // Add all screenshots in chronological order (first at top, latest at bottom)
+    const sortedScreenshots = tvdData.screenshots.sort((a, b) => a.timestamp - b.timestamp);
+    sortedScreenshots.forEach((screenshot, index) => {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: `Screenshot ${index + 1}: ${screenshot.description || 'Screenshot'}`, bold: true, size: 20 })
+          ],
+          spacing: { before: 180, after: 60 }
+        })
+      );
+
+      try {
+        const imageData = screenshot.data || screenshot.dataUrl;
+        
+        children.push(
+          new Paragraph({
+            children: [new ImageRun({
+              data: imageData,
+              transformation: {
+                width: 600,
+                height: 400
+              }
+            })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 120 }
+          })
+        );
+      } catch (error) {
+        console.warn('Failed to embed screenshot:', error);
+        children.push(
+          new Paragraph({
+            text: `[Screenshot: ${screenshot.filename || 'Image'}]`,
+            spacing: { after: 120 }
+          })
+        );
+      }
+    });
+
+    // Add children to document sections
+    doc.addSection({
+      properties: {},
+      children: children
+    });
+
+    // Generate blob (browser-compatible)
+    return await this.docx.Packer.toBlob(doc);
   }
 }
 

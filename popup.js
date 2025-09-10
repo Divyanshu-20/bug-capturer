@@ -10,6 +10,7 @@ const activateBtn = document.getElementById('activate-btn');
 const refreshBtn = document.getElementById('refresh-btn');
 const clearBtn = document.getElementById('clear-btn');
 const exportBtn = document.getElementById('export-btn');
+const tvdBtn = document.getElementById('tvd-btn');
 
 const stopBtn = document.getElementById('stop-btn');
 const toggleBtn = document.getElementById('toggle-btn');
@@ -145,9 +146,9 @@ function renderSteps(steps = allSteps, filter = '') {
     const readableDescription = formatStepDirectly(step);
     
     return `
-      <div class="step-item clean" 
+      <div class="step-item clean text-overflow-handle" 
            aria-label="Step ${index + 1}: ${readableDescription}">
-        <div class="step-clean-description">
+        <div class="step-clean-description long-text">
           ${index + 1}. ${readableDescription}
         </div>
       </div>
@@ -236,24 +237,24 @@ async function clearSteps() {
       // Also reload from storage to ensure sync
       await loadSteps(true);
       status.textContent = 'Steps cleared successfully';
-      status.style.color = '#059669';
+      status.className = 'status success';
       
       // Clear search
       searchBox.value = '';
     } else {
       status.textContent = 'Error clearing steps: ' + (response?.error || 'Unknown error');
-      status.style.color = '#dc3545';
+      status.className = 'status error';
     }
   } catch (error) {
     console.error('Clear steps error:', error);
     status.textContent = 'Failed to clear steps: ' + error.message;
-    status.style.color = '#dc3545';
+    status.className = 'status error';
   } finally {
     clearBtn.disabled = false;
     // Reset status after 3 seconds
     setTimeout(() => {
       status.textContent = '';
-      status.style.color = '';
+      status.className = 'status';
     }, 3000);
   }
 }
@@ -264,7 +265,7 @@ async function clearSteps() {
 function exportRTFDocument() {
   if (!isExtensionActive) {
     status.textContent = 'Extension must be activated first';
-    status.style.color = '#dc3545';
+    status.className = 'status error';
     return;
   }
   
@@ -370,7 +371,7 @@ Report Type: Bug Context Capturer\\par
 async function generateComprehensiveReport() {
   if (!isExtensionActive) {
     status.textContent = 'Extension must be activated first';
-    status.style.color = '#dc3545';
+    status.className = 'status error';
     return;
   }
   
@@ -668,39 +669,178 @@ function showBugModal(steps, metadata, stats, readableSteps) {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.95);
     z-index: 2147483647;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   `;
   
   // Create modal content
   const modalContent = document.createElement('div');
+  modalContent.className = 'modal-content';
   modalContent.style.cssText = `
-    background: white;
-    border-radius: 12px;
-    width: 90%;
+    background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%) !important;
+    color: #ffffff !important;
+    border-radius: 20px;
+    width: 95%;
     max-width: 800px;
-    max-height: 90%;
+    max-height: 95%;
     overflow-y: auto;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.1);
     position: relative;
     z-index: 2147483648;
-    border: 2px solid #e5e7eb;
-    animation: modalFadeIn 0.3s ease-out;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    animation: modalFadeIn 0.4s ease-out;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   `;
   
-  // Add CSS animation for smooth appearance
+  // Add CSS animation and styling for smooth appearance
   if (!document.getElementById('modal-styles')) {
     const style = document.createElement('style');
     style.id = 'modal-styles';
     style.textContent = `
       @keyframes modalFadeIn {
-        from { opacity: 0; transform: scale(0.9) translateY(-20px); }
-        to { opacity: 1; transform: scale(1) translateY(0); }
+        from { 
+          opacity: 0; 
+          transform: scale(0.9) translateY(-30px); 
+        }
+        to { 
+          opacity: 1; 
+          transform: scale(1) translateY(0); 
+        }
+      }
+      
+      /* Custom scrollbar for modal */
+      #bug-report-modal .modal-content::-webkit-scrollbar {
+        width: 8px;
+      }
+      
+      #bug-report-modal .modal-content::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+      }
+      
+      #bug-report-modal .modal-content::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 4px;
+      }
+      
+      #bug-report-modal .modal-content::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.5);
+      }
+      
+      /* Enhanced button styles */
+      .modal-btn {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+        color: white !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        padding: 12px 24px !important;
+        border-radius: 12px !important;
+        cursor: pointer !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
+      }
+      
+      .modal-btn:hover {
+        transform: translateY(-2px) scale(1.02) !important;
+        box-shadow: 0 8px 20px rgba(59, 130, 246, 0.5) !important;
+      }
+      
+      .modal-btn:active {
+        transform: translateY(0) scale(0.98) !important;
+      }
+      
+      .close-modal-btn {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+        color: white !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        padding: 8px !important;
+        border-radius: 50% !important;
+        cursor: pointer !important;
+        font-size: 18px !important;
+        width: 40px !important;
+        height: 40px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3) !important;
+      }
+      
+      .close-modal-btn:hover {
+        transform: scale(1.1) !important;
+        box-shadow: 0 6px 16px rgba(239, 68, 68, 0.5) !important;
+      }
+      
+      /* Enhanced textarea styling */
+      #bug-report-modal textarea {
+        outline: none !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        line-height: 1.5 !important;
+      }
+      
+      #bug-report-modal textarea::placeholder {
+        color: rgba(255, 255, 255, 0.5) !important;
+        font-style: italic !important;
+      }
+      
+      /* Section headers with better spacing */
+      #bug-report-modal h3 {
+        position: relative;
+        padding-left: 12px;
+      }
+      
+      #bug-report-modal h3::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 4px;
+        height: 24px;
+        background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+        border-radius: 2px;
+      }
+      
+      /* Force black background and white text for modal */
+      #bug-report-modal {
+        background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%) !important;
+        color: #ffffff !important;
+      }
+      
+      #bug-report-modal * {
+        color: inherit !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      
+      #bug-report-modal h1, #bug-report-modal h2, #bug-report-modal h3, #bug-report-modal h4, #bug-report-modal h5, #bug-report-modal h6 {
+        color: #ffffff !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+      }
+      
+      #bug-report-modal p, #bug-report-modal div, #bug-report-modal span {
+        color: #ffffff !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+      }
+      
+      /* Override any white backgrounds */
+      #bug-report-modal .modal-content {
+        background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%) !important;
+        color: #ffffff !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
       }
     `;
     document.head.appendChild(style);
@@ -779,106 +919,129 @@ function generateModalHTML(steps, metadata, stats, readableSteps) {
   }).join(' → ');
   
   return `
-    <div style="padding: 24px; border-bottom: 2px solid #e5e7eb; background: linear-gradient(135deg, #f8fafc, #e2e8f0);">
-      <div style="position: relative; margin-bottom: 16px;">
-        <button id="close-modal" style="position: absolute; top: -8px; right: -8px; background: #ef4444; border: none; color: white; font-size: 18px; cursor: pointer; padding: 8px; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.2s ease; z-index: 1000;" onmouseover="this.style.background='#dc2626'; this.style.transform='scale(1.1)'" onmouseout="this.style.background='#ef4444'; this.style.transform='scale(1)'">×</button>
-        <div>
-          <h1 style="margin: 0; color: #1f2937; font-size: 28px; font-weight: 700; margin-bottom: 4px;">🐛 ${title}</h1>
-          <div style="color: #6b7280; font-size: 14px;">Bug Report - ${new Date().toLocaleString()}</div>
-        </div>
-      </div>
-    </div>
-    
-    <div style="padding: 24px;">
-      <!-- Statistics Section at the top -->
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px; font-weight: 600;">📊 Statistics</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
-          <div style="background: #dbeafe; padding: 12px; border-radius: 6px; text-align: center;">
-            <div style="font-size: 24px; font-weight: bold; color: #1e40af;">${stats.total}</div>
-            <div style="font-size: 12px; color: #1e40af;">Total Steps</div>
-          </div>
-          <div style="background: #dcfce7; padding: 12px; border-radius: 6px; text-align: center;">
-            <div style="font-size: 24px; font-weight: bold; color: #166534;">${stats.click || 0}</div>
-            <div style="font-size: 12px; color: #166534;">Clicks</div>
-          </div>
-          <div style="background: #fef3c7; padding: 12px; border-radius: 6px; text-align: center;">
-            <div style="font-size: 24px; font-weight: bold; color: #92400e;">${stats.form}</div>
-            <div style="font-size: 12px; color: #92400e;">Form Actions</div>
-          </div>
-          <div style="background: #fecaca; padding: 12px; border-radius: 6px; text-align: center;">
-            <div style="font-size: 24px; font-weight: bold; color: #dc2626;">${stats.error || 0}</div>
-            <div style="font-size: 12px; color: #dc2626;">Errors</div>
-          </div>
+    <div style="padding: 0; overflow-y: auto; background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%); color: #ffffff;">
+      <!-- Header Section -->
+      <div style="padding: 20px 20px 16px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%); border-bottom: 1px solid rgba(255, 255, 255, 0.1); position: relative;">
+        <button id="close-modal" class="close-modal-btn" style="position: absolute; top: 20px; right: 20px;">×</button>
+        <div style="padding-right: 60px;">
+          <h1 style="margin: 0; color: #ffffff !important; font-size: 20px; font-weight: 700; margin-bottom: 8px; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">🐛 ${title}</h1>
+          <div style="color: rgba(255, 255, 255, 0.7) !important; font-size: 12px; font-weight: 500; word-wrap: break-word; overflow-wrap: break-word;">Bug Report - ${new Date().toLocaleString()}</div>
         </div>
       </div>
       
-      <!-- Defect Screenshot Section -->
-      ${screenshots.length > 0 ? `
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px; font-weight: 600;">📸 Defect Screenshot</h3>
-        ${screenshots.map((screenshot, index) => {
-          const filename = `screenshot${String(index + 1).padStart(2, '0')}.png`;
-          return `
-          <div style="margin-bottom: 16px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-            <div style="padding: 40px 20px; background: #f8fafc; text-align: center; color: #6b7280;">
-              <div style="font-size: 48px; margin-bottom: 8px;">📸</div>
-              <div style="font-size: 14px; font-weight: 500;">${screenshot.description || `Screenshot ${index + 1}`}</div>
-              <div style="font-size: 12px; margin-top: 4px;">File: ./bug-report-assets/${filename}</div>
+      <!-- Main Content -->
+      <div style="padding: 20px; background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%); color: #ffffff;">
+        <!-- Statistics Section -->
+        <div style="margin-bottom: 32px;">
+          <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">📊 Statistics</h3>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;">
+            <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.1) 100%); padding: 16px; border-radius: 12px; text-align: center; border: 1px solid rgba(59, 130, 246, 0.3); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);">
+              <div style="font-size: 20px; font-weight: 700; color: #60a5fa; margin-bottom: 4px;">${stats.total}</div>
+              <div style="font-size: 11px; color: #93c5fd; font-weight: 600;">Total Steps</div>
+            </div>
+            <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.1) 100%); padding: 16px; border-radius: 12px; text-align: center; border: 1px solid rgba(16, 185, 129, 0.3); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+              <div style="font-size: 20px; font-weight: 700; color: #6ee7b7; margin-bottom: 4px;">${stats.click || 0}</div>
+              <div style="font-size: 11px; color: #a7f3d0; font-weight: 600;">Clicks</div>
+            </div>
+            <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.1) 100%); padding: 16px; border-radius: 12px; text-align: center; border: 1px solid rgba(245, 158, 11, 0.3); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);">
+              <div style="font-size: 20px; font-weight: 700; color: #fde047; margin-bottom: 4px;">${stats.form}</div>
+              <div style="font-size: 11px; color: #fef3c7; font-weight: 600;">Form Actions</div>
+            </div>
+            <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.1) 100%); padding: 16px; border-radius: 12px; text-align: center; border: 1px solid rgba(239, 68, 68, 0.3); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);">
+              <div style="font-size: 20px; font-weight: 700; color: #fca5a5; margin-bottom: 4px;">${stats.error || 0}</div>
+              <div style="font-size: 11px; color: #fecaca; font-weight: 600;">Errors</div>
             </div>
           </div>
-        `;
-        }).join('')}
-      </div>
-      ` : ''}
-      
-      <!-- Steps to Reproduce Section -->
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px; font-weight: 600;">📝 Steps to Reproduce</h3>
-        <div style="background: #f8fafc; color: #1f2937; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; max-height: 400px; overflow-y: auto; font-family: monospace; white-space: pre-line;">
-          ${readableSteps}
         </div>
-      </div>
       
-      <!-- Expected Results Section -->
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px; font-weight: 600;">✅ Expected Results</h3>
-        <textarea id="expected-results" 
-                  placeholder="Please describe what should have happened..." 
-                  style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; resize: vertical; background: #f0f9ff; color: #1e40af;">
-        </textarea>
-      </div>
-      
-      <!-- Actual Results Section -->
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px; font-weight: 600;">❌ Actual Results</h3>
-        <div style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-          <div style="margin-bottom: 8px; font-weight: 500;">URL: ${url}</div>
-          <div style="margin-bottom: 8px; font-weight: 500;">Steps performed: ${stats.total} actions recorded</div>
-          <div style="font-size: 14px; color: #991b1b;">See "Steps to Reproduce" section above for detailed actions</div>
+        <!-- Defect Screenshot Section -->
+        ${screenshots.length > 0 ? `
+        <div style="margin-bottom: 32px;">
+          <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">📸 Defect Screenshot</h3>
+          ${screenshots.map((screenshot, index) => {
+            const filename = `screenshot${String(index + 1).padStart(2, '0')}.png`;
+            return `
+            <div style="margin-bottom: 20px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 12px; overflow: hidden; background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px);">
+              <div style="padding: 16px; text-align: center; color: rgba(255, 255, 255, 0.8);">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 12px; word-wrap: break-word; overflow-wrap: break-word;">${screenshot.description || `Screenshot ${index + 1}`}</div>
+                ${screenshot.dataURL ? `
+                  <div style="border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; overflow: hidden; background: #000; max-width: 100%;">
+                    <img src="${screenshot.dataURL}" 
+                         style="width: 100%; height: auto; max-height: 300px; object-fit: contain; cursor: pointer; display: block;" 
+                         onclick="this.style.maxHeight = this.style.maxHeight === 'none' ? '300px' : 'none'; this.style.objectFit = this.style.objectFit === 'contain' ? 'cover' : 'contain';"
+                         title="Click to expand/collapse and toggle fit mode"
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                    <div style="display: none; padding: 30px 16px; text-align: center; color: rgba(255, 255, 255, 0.6);">
+                      <div style="font-size: 32px; margin-bottom: 8px;">📸</div>
+                      <div style="font-size: 10px;">Image failed to load</div>
+                    </div>
+                  </div>
+                ` : `
+                  <div style="padding: 30px 16px; text-align: center; color: rgba(255, 255, 255, 0.6);">
+                    <div style="font-size: 32px; margin-bottom: 8px;">📸</div>
+                    <div style="font-size: 10px;">No screenshot data available</div>
+                  </div>
+                `}
+                <div style="font-size: 10px; color: rgba(255, 255, 255, 0.6); margin-top: 8px; word-wrap: break-word; overflow-wrap: break-word;">File: ./bug-report-assets/${filename}</div>
+              </div>
+            </div>
+          `;
+          }).join('')}
         </div>
-        <textarea id="actual-results" 
-                  placeholder="Please describe what actually happened, any error messages, or unexpected behavior..." 
-                  style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; resize: vertical; background: #fef2f2; color: #dc2626;">
-        </textarea>
-      </div>
+        ` : ''}
       
-      <!-- Environment Section -->
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px; font-weight: 600;">🖥️ Environment</h3>
-        <div style="background: #1f2937; color: #f9fafb; border: 1px solid #4b5563; border-radius: 8px; padding: 16px;">
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 8px; font-size: 14px;">
-            ${Object.entries(metadata).map(([key, value]) => 
-              `<div><strong style="color: #60a5fa;">${key}:</strong> ${value}</div>`
-            ).join('')}
+        <!-- Steps to Reproduce Section -->
+        <div style="margin-bottom: 32px;">
+          <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">📝 Steps to Reproduce</h3>
+          <div style="background: rgba(255, 255, 255, 0.05); color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 12px; padding: 20px; max-height: 400px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; white-space: pre-line; font-size: 11px; line-height: 1.4; backdrop-filter: blur(10px); word-wrap: break-word; overflow-wrap: break-word;">
+            ${readableSteps}
           </div>
         </div>
-      </div>
       
-      <!-- Action Buttons -->
-        <div style="display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-          <button id="copy-report" style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 500;">📋 Copy to Clipboard</button>
+        <!-- Expected Results Section -->
+        <div style="margin-bottom: 32px;">
+          <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">✅ Expected Results</h3>
+          <textarea id="expected-results" 
+                    placeholder="Please describe what should have happened..." 
+                    style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; resize: vertical; background: rgba(59, 130, 246, 0.1); color: #ffffff; backdrop-filter: blur(10px); transition: all 0.3s ease; line-height: 1.4;"
+                    onfocus="this.style.borderColor='#60a5fa'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.2)'"
+                    onblur="this.style.borderColor='rgba(59, 130, 246, 0.3)'; this.style.boxShadow='none'">
+          </textarea>
         </div>
+        
+        <!-- Actual Results Section -->
+        <div style="margin-bottom: 32px;">
+          <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">❌ Actual Results</h3>
+          <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.1) 100%); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 20px; margin-bottom: 16px; backdrop-filter: blur(10px); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);">
+            <div style="margin-bottom: 12px; font-weight: 600; font-size: 12px; color: #fca5a5 !important; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.3;">🌐 URL: ${url}</div>
+            <div style="margin-bottom: 12px; font-weight: 600; font-size: 12px; color: #fca5a5 !important;">📊 Steps performed: ${stats.total} actions recorded</div>
+            <div style="font-size: 11px; color: #fecaca !important; font-weight: 500; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.3;">See "Steps to Reproduce" section above for detailed actions</div>
+          </div>
+          <textarea id="actual-results" 
+                    placeholder="Please describe what actually happened, any error messages, or unexpected behavior..." 
+                    style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; resize: vertical; background: rgba(239, 68, 68, 0.1); color: #ffffff; backdrop-filter: blur(10px); transition: all 0.3s ease; line-height: 1.4;"
+                    onfocus="this.style.borderColor='#fca5a5'; this.style.boxShadow='0 0 0 3px rgba(239, 68, 68, 0.2)'"
+                    onblur="this.style.borderColor='rgba(239, 68, 68, 0.3)'; this.style.boxShadow='none'">
+          </textarea>
+        </div>
+      
+        <!-- Environment Section -->
+        <div style="margin-bottom: 32px;">
+          <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">🖥️ Environment</h3>
+          <div style="background: linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.9) 100%); color: #f9fafb; border: 1px solid rgba(75, 85, 99, 0.5); border-radius: 12px; padding: 20px; backdrop-filter: blur(10px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; font-size: 11px;">
+              ${Object.entries(metadata).map(([key, value]) => 
+                `<div style="padding: 6px 0; border-bottom: 1px solid rgba(75, 85, 99, 0.3); word-wrap: break-word; overflow-wrap: break-word;"><strong style="color: #60a5fa; font-weight: 600;">${key}:</strong> <span style="color: #d1d5db; margin-left: 8px; word-wrap: break-word; overflow-wrap: break-word;">${value}</span></div>`
+              ).join('')}
+            </div>
+          </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div style="display: flex; gap: 12px; justify-content: flex-end; padding: 16px 0 0; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+          <button id="copy-report" class="modal-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important; font-size: 11px; padding: 8px 16px;">📋 Copy to Clipboard</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -983,6 +1146,76 @@ async function downloadWordDocumentReport() {
 
 
 /**
+ * TVD - Capture all screenshots from session and generate Word document
+ */
+async function generateTVDReport() {
+  try {
+    if (!isExtensionActive) {
+      status.textContent = 'Extension must be activated first';
+      status.className = 'status error';
+      return;
+    }
+
+    if (allSteps.length === 0) {
+      status.textContent = 'No steps to generate TVD report';
+      status.className = 'status error';
+      return;
+    }
+
+    // Show loading status
+    status.textContent = 'Generating TVD report with all screenshots...';
+    status.style.color = '#f97316';
+
+    // Get all screenshots from the session and sort by timestamp (first at top, latest at bottom)
+    const sessionScreenshots = screenshots.filter(screenshot => 
+      screenshot.timestamp && screenshot.dataURL
+    ).sort((a, b) => a.timestamp - b.timestamp);
+
+    if (sessionScreenshots.length === 0) {
+      status.textContent = 'No screenshots found in session';
+      status.className = 'status error';
+      return;
+    }
+
+    // Prepare screenshots data for TVD report (screenshots only)
+    const screenshotData = sessionScreenshots.map((screenshot, index) => ({
+      filename: `screenshot-${String(index + 1).padStart(2, '0')}.png`,
+      dataUrl: screenshot.dataURL,
+      data: screenshot.dataURL,
+      description: screenshot.description || `Screenshot ${index + 1}`,
+      timestamp: screenshot.timestamp,
+      type: screenshot.type || 'fullpage'
+    }));
+
+    // Initialize and use Word generator
+    const wordGenerator = new WordReportGenerator();
+    await wordGenerator.initialize();
+    
+    const filename = `tvd-report-${new Date().toISOString().slice(0, 10)}.docx`;
+    const result = await wordGenerator.generateTVDReport('', screenshotData, {
+      url: allSteps[0]?.url || 'Unknown URL',
+      browser: navigator.userAgent,
+      platform: navigator.platform,
+      timestamp: new Date().toISOString(),
+      totalScreenshots: sessionScreenshots.length,
+      totalSteps: allSteps.length
+    }, filename);
+
+    if (result.success) {
+      status.textContent = `✅ TVD report generated with ${sessionScreenshots.length} screenshots!`;
+      status.className = 'status success';
+    } else {
+      status.textContent = `❌ Failed to generate TVD report: ${result.error}`;
+      status.className = 'status error';
+    }
+  } catch (error) {
+    console.error('Failed to generate TVD report:', error);
+    status.textContent = `❌ Error generating TVD report: ${error.message}`;
+    status.className = 'status error';
+  }
+}
+
+/**
  * Generate professional Word document using client-side docx library
  */
 async function generateWordDocumentReport() {
@@ -1001,8 +1234,9 @@ async function generateWordDocumentReport() {
     // Generate raw text report
     const rawText = generateTextReportForWord(steps, stats, readableSteps);
     
-    // Prepare screenshots data
-    const screenshotData = screenshots.map((screenshot, index) => ({
+    // Prepare screenshots data and sort by timestamp (first at top, latest at bottom)
+    const sortedScreenshots = screenshots.sort((a, b) => a.timestamp - b.timestamp);
+    const screenshotData = sortedScreenshots.map((screenshot, index) => ({
       filename: `screenshot-${index + 1}.png`,
       dataUrl: screenshot.dataURL || screenshot.data,
       data: screenshot.dataURL || screenshot.data,
@@ -1027,16 +1261,16 @@ async function generateWordDocumentReport() {
     }, filename);
 
     if (result.success) {
-      status.textContent = '✅ Word document generated and downloaded successfully!';
-      status.style.color = '#22c55e';
+    status.textContent = '✅ Word document generated and downloaded successfully!';
+    status.className = 'status success';
     } else {
       status.textContent = `❌ Failed to generate Word report: ${result.error}`;
-      status.style.color = '#dc3545';
+      status.className = 'status error';
     }
   } catch (error) {
     console.error('Failed to generate Word document:', error);
     status.textContent = `❌ Error generating Word document: ${error.message}`;
-    status.style.color = '#dc3545';
+    status.className = 'status error';
   }
 }
 
@@ -1558,7 +1792,7 @@ async function captureScreenshotAdvanced(type = 'fullpage') {
 async function startCustomSelection() {
   if (!isExtensionActive) {
     status.textContent = 'Extension must be activated first';
-    status.style.color = '#dc3545';
+    status.className = 'status error';
     return;
   }
 
@@ -1591,7 +1825,7 @@ async function startCustomSelection() {
       }
     } else {
       status.textContent = 'No active tab found';
-      status.style.color = '#dc3545';
+      status.className = 'status error';
     }
   } catch (error) {
     console.error('Error starting custom area selection:', error);
@@ -1897,7 +2131,7 @@ async function stopRecording() {
 async function toggleRecording() {
   if (!isExtensionActive) {
     status.textContent = 'Extension must be activated first';
-    status.style.color = '#dc3545';
+    status.className = 'status error';
     return;
   }
   
@@ -1931,7 +2165,7 @@ async function toggleRecording() {
       }
     } else {
       status.textContent = 'No active tab found';
-      status.style.color = '#dc3545';
+      status.className = 'status error';
     }
   } catch (error) {
     status.textContent = 'Error toggling recording: ' + error.message;
@@ -2015,22 +2249,22 @@ async function checkRecordingState() {
         updateToggleButton(contentRecording);
         
         if (contentRecording) {
-          status.textContent = 'Recording active';
-          status.style.color = '#28a745';
+        status.textContent = 'Recording active';
+        status.className = 'status success';
         } else {
           status.textContent = 'Recording paused';
-          status.style.color = '#ffc107';
+          status.className = 'status warning';
         }
       } else {
         // Content script responded but not ready - use background state as fallback
         const fallbackRecording = backgroundState?.state?.isRecording || false;
         status.textContent = 'Content script initializing...';
-        status.style.color = '#ffc107';
+        status.className = 'status warning';
         updateToggleButton(fallbackRecording);
       }
     } else {
       status.textContent = 'No active tab found';
-      status.style.color = '#dc3545';
+      status.className = 'status error';
     }
   } catch (error) {
     // Content script might not be loaded yet or timeout occurred
@@ -2124,6 +2358,10 @@ async function activateExtension() {
       exportWordBtn.disabled = false;
       exportWordBtn.classList.remove('disabled');
     }
+    if (tvdBtn) {
+      tvdBtn.disabled = false;
+      tvdBtn.classList.remove('disabled');
+    }
     toggleBtn.disabled = false;
     toggleBtn.classList.remove('disabled');
     stopBtn.disabled = false;
@@ -2209,6 +2447,10 @@ async function deactivateExtension() {
     clearBtn.classList.add('disabled');
     exportBtn.disabled = true;
     exportBtn.classList.add('disabled');
+    if (tvdBtn) {
+      tvdBtn.disabled = true;
+      tvdBtn.classList.add('disabled');
+    }
     toggleBtn.disabled = true;
     toggleBtn.classList.add('disabled');
     stopBtn.disabled = true;
@@ -2313,6 +2555,13 @@ const exportWordBtn = document.getElementById('export-word-btn');
 if (exportWordBtn) {
   exportWordBtn.addEventListener('click', async () => {
     await generateWordDocumentReport();
+  });
+}
+
+// Add TVD button functionality
+if (tvdBtn) {
+  tvdBtn.addEventListener('click', async () => {
+    await generateTVDReport();
   });
 }
 
@@ -2559,6 +2808,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           exportWordBtn.disabled = false;
           exportWordBtn.classList.remove('disabled');
         }
+        if (tvdBtn) {
+          tvdBtn.disabled = false;
+          tvdBtn.classList.remove('disabled');
+        }
         toggleBtn.disabled = false;
         toggleBtn.classList.remove('disabled');
         stopBtn.disabled = false;
@@ -2652,36 +2905,6 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'Tab') {
     recordStep('navigation', e.target, `Tab ${e.shiftKey ? 'backward' : 'forward'}`).catch(console.error);
   }
-  // ADD THIS: Handle Enter key for screenshots when not in form elements
-  else if (e.key === 'Enter' && window.bcState.recording) {
-    // Don't trigger if user is typing in form elements
-    if (!['input', 'textarea', 'select'].includes(e.target.tagName.toLowerCase())) {
-      e.preventDefault();
-      // Trigger screenshot capture
-      captureScreenshotPause().then(screenshot => {
-        if (screenshot) {
-          // Record screenshot step
-          recordStep({
-            type: 'screenshot',
-            time: Date.now(),
-            description: 'Screenshot captured via Enter key',
-            dataURL: screenshot,
-            timestamp: Date.now(),
-            url: window.location.href,
-            viewport: `${window.innerWidth}x${window.innerHeight}`,
-            sessionId: window.bcState.sessionId,
-            meta: {
-              action: 'screenshot',
-              timestamp: Date.now() - window.bcState.startTime
-            }
-          }).catch(console.error);
-          
-          showToast('📸 Screenshot captured!');
-        }
-      }).catch(error => {
-        console.error('Screenshot capture failed:', error);
-        showToast('❌ Screenshot failed');
-      });
-    }
-  }
+  // Enter key screenshot handling removed - now handled by content script
+  // to avoid duplicate screenshots
 }, true);

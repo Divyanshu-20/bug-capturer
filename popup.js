@@ -4,6 +4,64 @@ let autoRefreshInterval = null;
 let lastLoadTime = 0;
 const LOAD_THROTTLE_MS = 1000; // Minimum 1 second between loads
 
+// Track report downloads to prevent premature data clearing
+let reportDownloadTracker = {
+  wordReportDownloaded: false,
+  tvdReportDownloaded: false,
+  reset() {
+    this.wordReportDownloaded = false;
+    this.tvdReportDownloaded = false;
+  },
+  shouldClearData() {
+    return this.wordReportDownloaded && this.tvdReportDownloaded;
+  },
+  markReportDownloaded(reportType) {
+    if (reportType === 'word') {
+      this.wordReportDownloaded = true;
+    } else if (reportType === 'tvd') {
+      this.tvdReportDownloaded = true;
+    }
+    
+    // Auto-clear data only when both reports are downloaded
+    if (this.shouldClearData()) {
+      setTimeout(() => {
+        clearSteps(true);
+        clearAllScreenshots(true);
+        this.reset(); // Reset tracker for next session
+      }, 1000);
+    }
+  }
+};
+
+/**
+ * Get the current/latest URL from the background script
+ * Falls back to stored current URL if tracking is not available
+ */
+async function getCurrentUrl() {
+  try {
+    const response = await chrome.runtime.sendMessage({ cmd: 'get-current-tab-url' });
+    if (response && response.url) {
+      return response.url;
+    }
+  } catch (error) {
+    console.warn('Failed to get current URL from background:', error);
+  }
+  
+  // Fallback to stored current URL
+  try {
+    const storedData = await chrome.storage.local.get(['bc_current_url']);
+    if (storedData.bc_current_url) {
+      return storedData.bc_current_url;
+    }
+  } catch (error) {
+    console.warn('Failed to get stored current URL:', error);
+  }
+  
+  // Final fallback to first step URL if no current URL is available
+  const firstStep = allSteps.find(step => step.url);
+  return firstStep?.url || 'Unknown URL';
+}
+
 
 // DOM elements
 const activateBtn = document.getElementById('activate-btn');
@@ -42,6 +100,31 @@ let isExtensionActive = false;
 let screenshots = []; // Store captured screenshots
 let currentScreenshotIndex = -1; // For modal navigation
 let stepsCollapsed = false; // Track steps container state
+
+/**
+ * Deduplicate screenshots based on dataURL or timestamp
+ * @param {Array} screenshots - Array of screenshot objects
+ * @returns {Array} Deduplicated screenshots
+ */
+function deduplicateScreenshots(screenshots) {
+  if (!screenshots || screenshots.length === 0) return [];
+  
+  const seen = new Set();
+  const uniqueScreenshots = [];
+  
+  screenshots.forEach(screenshot => {
+    // Use dataURL as primary identifier, fallback to timestamp + description
+    const identifier = screenshot.dataURL || screenshot.dataUrl || 
+                      `${screenshot.timestamp}_${screenshot.description || screenshot.filename || ''}`;
+    
+    if (!seen.has(identifier)) {
+      seen.add(identifier);
+      uniqueScreenshots.push(screenshot);
+    }
+  });
+  
+  return uniqueScreenshots;
+}
 
 // Custom screenshot selection state - moved to content script
 
@@ -219,15 +302,17 @@ async function loadSteps(silent = false) {
 /**
  * Clear all stored steps
  */
-async function clearSteps() {
-  if (!confirm('Clear all recorded steps? This cannot be undone.')) {
+async function clearSteps(skipConfirmation = false) {
+  if (!skipConfirmation && !confirm('Clear all recorded steps? This cannot be undone.')) {
     return;
   }
   
   try {
-    clearBtn.disabled = true;
-    status.textContent = 'Clearing...';
-    status.style.color = '#6b7280';
+    if (clearBtn) clearBtn.disabled = true;
+    if (!skipConfirmation) {
+      status.textContent = 'Clearing...';
+      status.style.color = '#6b7280';
+    }
     
     const response = await chrome.runtime.sendMessage({ cmd: 'clear-steps' });
     
@@ -236,33 +321,45 @@ async function clearSteps() {
       renderSteps();
       // Also reload from storage to ensure sync
       await loadSteps(true);
-      status.textContent = 'Steps cleared successfully';
-      status.className = 'status success';
+      
+      // Reset report download tracker
+      reportDownloadTracker.reset();
+      
+      if (!skipConfirmation) {
+        status.textContent = 'Steps cleared successfully';
+        status.className = 'status success';
+      }
       
       // Clear search
-      searchBox.value = '';
+      if (searchBox) searchBox.value = '';
     } else {
-      status.textContent = 'Error clearing steps: ' + (response?.error || 'Unknown error');
-      status.className = 'status error';
+      if (!skipConfirmation) {
+        status.textContent = 'Error clearing steps: ' + (response?.error || 'Unknown error');
+        status.className = 'status error';
+      }
     }
   } catch (error) {
     console.error('Clear steps error:', error);
-    status.textContent = 'Failed to clear steps: ' + error.message;
-    status.className = 'status error';
+    if (!skipConfirmation) {
+      status.textContent = 'Failed to clear steps: ' + error.message;
+      status.className = 'status error';
+    }
   } finally {
-    clearBtn.disabled = false;
+    if (clearBtn) clearBtn.disabled = false;
     // Reset status after 3 seconds
-    setTimeout(() => {
-      status.textContent = '';
-      status.className = 'status';
-    }, 3000);
+    if (!skipConfirmation) {
+      setTimeout(() => {
+        status.textContent = '';
+        status.className = 'status';
+      }, 3000);
+    }
   }
 }
 
 /**
  * Export steps as Word document file
  */
-function exportRTFDocument() {
+async function exportRTFDocument() {
   if (!isExtensionActive) {
     status.textContent = 'Extension must be activated first';
     status.className = 'status error';
@@ -274,9 +371,10 @@ function exportRTFDocument() {
     return;
   }
   
-  // Generate RTF content
+  // Get current URL and generate RTF content
+  const currentUrl = await getCurrentUrl();
   const title = `Bug Report - ${new Date().toLocaleDateString()}`;
-  const rtfContent = generateRTFReportHTML(allSteps, title);
+  const rtfContent = generateRTFReportHTML(allSteps, title, currentUrl);
   
   const blob = new Blob([rtfContent], { type: 'application/rtf' });
   const url = URL.createObjectURL(blob);
@@ -292,7 +390,7 @@ function exportRTFDocument() {
 /**
  * Generate RTF content for document
  */
-function generateRTFReportHTML(steps, title) {
+function generateRTFReportHTML(steps, title, currentUrl = 'Unknown URL') {
   // Filter out console and performance events
   const uiSteps = steps.filter(step => 
     step.type !== 'console' && step.type !== 'performance'
@@ -351,14 +449,14 @@ Generated: ${new Date().toLocaleString()}\\par
 \\par
 {\\b\\fs26 ❌ Actual Results}\\par
 \\par
-URL: ${allSteps[0]?.url || 'Unknown URL'}\\par
+URL: ${currentUrl}\\par
 Steps performed: ${stats.total} actions recorded\\par
 Details: See "Steps to Reproduce" section above for detailed actions\\par
 [Please describe what actually happened and any error messages or unexpected behavior]\\par
 \\par
 {\\b\\fs26 🖥️ Environment}\\par
 \\par
-URL: ${allSteps[0]?.url || 'Unknown URL'}\\par
+URL: ${currentUrl}\\par
 Browser: ${navigator.userAgent.split(' ')[0]}\\par
 Platform: ${navigator.platform}\\par
 Generated: ${new Date().toLocaleString()}\\par
@@ -469,33 +567,60 @@ function formatStepDirectly(step) {
   switch (action) {
     case 'click':
       const clickTarget = getMeaningfulElementName(target, step);
-      return `Clicked on ${clickTarget}`;
+      // Check if this is a sensitive field click
+      if (clickTarget && clickTarget.includes('[REDACTED]')) {
+        return 'Clicked on a Sensitive field';
+      }
+      return `Clicked ${addProperArticle(clickTarget)}`;
     case 'input':
       const fieldName = getMeaningfulElementName(target, step);
-      const value = details || step.meta?.value || '';
+      let value = details || step.meta?.value || '';
+      
+      // Remove duplication patterns like "Entered "admin" in Username"
+      if (value.startsWith('Entered "') && value.includes('" in ')) {
+        const match = value.match(/^Entered "([^"]+)" in (.+)$/);
+        if (match) {
+          value = match[1]; // Extract just the actual value
+        }
+      }
+      
       if (value && value.trim() !== '' && value !== '[REDACTED]') {
-        return `Entered "${value}" in ${fieldName}`;
+        return `Entered "${value}" into ${addProperArticle(fieldName)}`;
       } else if (value === '[REDACTED]') {
-        return `Entered sensitive data in ${fieldName}`;
+        return `Entered sensitive data into ${addProperArticle(fieldName)}`;
       } else {
-        return `Cleared ${fieldName}`;
+        return `Cleared ${addProperArticle(fieldName)}`;
       }
     case 'select':
       const selectTarget = getMeaningfulElementName(target, step);
-      return `Selected "${details}" from ${selectTarget}`;
+      return `Selected "${details}" from ${addProperArticle(selectTarget)}`;
     case 'submit':
+      const submitButtonName = getMeaningfulElementName(target, step);
+      if (submitButtonName && submitButtonName !== 'element' && submitButtonName !== 'button') {
+        return `User clicked on "${submitButtonName}" page`;
+      }
       return `Submitted the form`;
     case 'hover':
-      return `Hovered over ${getMeaningfulElementName(target, step)}`;
+      return `Hovered over ${addProperArticle(getMeaningfulElementName(target, step))}`;
     case 'scroll':
       if (details && details.includes('down')) {
-        return `Scrolled down`;
+        return `Scrolled down on the page`;
       } else if (details && details.includes('up')) {
-        return `Scrolled up`;
+        return `Scrolled up on the page`;
       } else {
-        return `Scrolled`;
+        return `Scrolled on the page`;
       }
     case 'navigation':
+      // Prioritize step.url (current URL) over step.text (which may contain old URL)
+      if (step.url) {
+        return `Navigated to a new page: ${step.url}`;
+      }
+      // Fallback: Extract URL from step.text, step.meta.details, or target
+      const navigationText = step.text || step.meta?.details || target || '';
+      if (navigationText && navigationText.includes('Navigated to ')) {
+        const url = navigationText.replace('Navigated to ', '');
+        return `Navigated to a new page: ${url}`;
+      }
       return `Navigated to a new page`;
     case 'keypress':
       const keyText = step.text || 'a key';
@@ -507,18 +632,18 @@ function formatStepDirectly(step) {
         return `Pressed ${keyText}`;
       }
     case 'change':
-      return `Modified ${getMeaningfulElementName(target, step)}`;
+      return `Modified ${addProperArticle(getMeaningfulElementName(target, step))}`;
     case 'toggle':
-      return `Toggled ${getMeaningfulElementName(target, step)}`;
+      return `Toggled ${addProperArticle(getMeaningfulElementName(target, step))}`;
     case 'screenshot-custom':
     case 'screenshot':
-      return `Captured screenshot`;
+      return `Captured a screenshot`;
     case 'console':
       return `Console ${step.meta?.level || 'log'}: ${target}`;
     case 'performance':
       return `Performance event: ${target}`;
     default:
-      return `${action} on ${getMeaningfulElementName(target, step)}`;
+      return `Performed ${action} on ${addProperArticle(getMeaningfulElementName(target, step))}`;
   }
 }
 
@@ -559,14 +684,39 @@ function getMeaningfulElementName(target, step) {
   // Extract meaningful identifiers
   const lowerCleaned = cleaned.toLowerCase();
   
+  // Enhanced button detection with better text extraction
   if (lowerCleaned.includes('submit')) {
     return 'Submit button';
-  } else if (lowerCleaned.includes('login')) {
+  } else if (lowerCleaned.includes('login') || lowerCleaned.includes('log in') || lowerCleaned.includes('sign in')) {
     return 'Login button';
   } else if (lowerCleaned.includes('signup') || lowerCleaned.includes('sign up')) {
     return 'Sign Up button';
   } else if (lowerCleaned.includes('register')) {
     return 'Register button';
+  } else if (lowerCleaned.includes('save')) {
+    return 'Save button';
+  } else if (lowerCleaned.includes('cancel')) {
+    return 'Cancel button';
+  } else if (lowerCleaned.includes('delete') || lowerCleaned.includes('remove')) {
+    return 'Delete button';
+  } else if (lowerCleaned.includes('edit')) {
+    return 'Edit button';
+  } else if (lowerCleaned.includes('add') || lowerCleaned.includes('create')) {
+    return 'Add button';
+  } else if (lowerCleaned.includes('search')) {
+    return 'Search button';
+  } else if (lowerCleaned.includes('close')) {
+    return 'Close button';
+  } else if (lowerCleaned.includes('next')) {
+    return 'Next button';
+  } else if (lowerCleaned.includes('previous') || lowerCleaned.includes('prev')) {
+    return 'Previous button';
+  } else if (lowerCleaned.includes('back')) {
+    return 'Back button';
+  } else if (lowerCleaned.includes('continue')) {
+    return 'Continue button';
+  } else if (lowerCleaned.includes('confirm')) {
+    return 'Confirm button';
   } else if (lowerCleaned.includes('button')) {
     return cleaned.includes('button') ? cleaned : `${cleaned} button`;
   } else if (lowerCleaned.includes('username') || lowerCleaned.includes('user name')) {
@@ -882,8 +1032,9 @@ function generateModalHTML(steps, metadata, stats, readableSteps) {
     // If URL parsing fails, use default title
   }
   
-  // Find screenshots in steps
-  const screenshots = steps.filter(step => step.type === 'screenshot' && step.dataURL);
+  // Find screenshots in steps and deduplicate them
+  const allScreenshots = steps.filter(step => step.type === 'screenshot' && step.dataURL);
+  const screenshots = deduplicateScreenshots(allScreenshots);
   
   // Create action summary for Actual Results
   const keyActions = steps.filter(step => 
@@ -1171,14 +1322,17 @@ async function generateTVDReport() {
       screenshot.timestamp && screenshot.dataURL
     ).sort((a, b) => a.timestamp - b.timestamp);
 
-    if (sessionScreenshots.length === 0) {
+    // Deduplicate screenshots to ensure only unique ones are included
+    const uniqueScreenshots = deduplicateScreenshots(sessionScreenshots);
+
+    if (uniqueScreenshots.length === 0) {
       status.textContent = 'No screenshots found in session';
       status.className = 'status error';
       return;
     }
 
     // Prepare screenshots data for TVD report (screenshots only)
-    const screenshotData = sessionScreenshots.map((screenshot, index) => ({
+    const screenshotData = uniqueScreenshots.map((screenshot, index) => ({
       filename: `screenshot-${String(index + 1).padStart(2, '0')}.png`,
       dataUrl: screenshot.dataURL,
       data: screenshot.dataURL,
@@ -1197,13 +1351,16 @@ async function generateTVDReport() {
       browser: navigator.userAgent,
       platform: navigator.platform,
       timestamp: new Date().toISOString(),
-      totalScreenshots: sessionScreenshots.length,
+      totalScreenshots: uniqueScreenshots.length,
       totalSteps: allSteps.length
     }, filename);
 
     if (result.success) {
-      status.textContent = `✅ TVD report generated with ${sessionScreenshots.length} screenshots!`;
+      status.textContent = `✅ TVD report generated with ${uniqueScreenshots.length} screenshots!`;
       status.className = 'status success';
+      
+      // Mark TVD report as downloaded
+      reportDownloadTracker.markReportDownloaded('tvd');
     } else {
       status.textContent = `❌ Failed to generate TVD report: ${result.error}`;
       status.className = 'status error';
@@ -1232,11 +1389,15 @@ async function generateWordDocumentReport() {
     const readableSteps = convertStepsToReadable(steps);
     
     // Generate raw text report
-    const rawText = generateTextReportForWord(steps, stats, readableSteps);
+    const rawText = await generateTextReportForWord(steps, stats, readableSteps);
     
     // Prepare screenshots data and sort by timestamp (first at top, latest at bottom)
     const sortedScreenshots = screenshots.sort((a, b) => a.timestamp - b.timestamp);
-    const screenshotData = sortedScreenshots.map((screenshot, index) => ({
+    
+    // Deduplicate screenshots to ensure only unique ones are included
+    const uniqueScreenshots = deduplicateScreenshots(sortedScreenshots);
+    
+    const screenshotData = uniqueScreenshots.map((screenshot, index) => ({
       filename: `screenshot-${index + 1}.png`,
       dataUrl: screenshot.dataURL || screenshot.data,
       data: screenshot.dataURL || screenshot.data,
@@ -1253,16 +1414,20 @@ async function generateWordDocumentReport() {
     await wordGenerator.initialize();
     
     const filename = `bug-report-${new Date().toISOString().slice(0, 10)}.docx`;
+    const currentUrl = await getCurrentUrl();
     const result = await wordGenerator.generateBugReport(rawText, screenshotData, {
-      url: steps[0]?.url || 'Unknown URL',
+      url: currentUrl,
       browser: navigator.userAgent,
       platform: navigator.platform,
       timestamp: new Date().toISOString()
     }, filename);
 
     if (result.success) {
-    status.textContent = '✅ Word document generated and downloaded successfully!';
-    status.className = 'status success';
+      status.textContent = '✅ Word document generated and downloaded successfully!';
+      status.className = 'status success';
+      
+      // Mark Word report as downloaded
+      reportDownloadTracker.markReportDownloaded('word');
     } else {
       status.textContent = `❌ Failed to generate Word report: ${result.error}`;
       status.className = 'status error';
@@ -1277,9 +1442,8 @@ async function generateWordDocumentReport() {
 /**
  * Generate text report specifically formatted for Word conversion
  */
-function generateTextReportForWord(steps, stats, readableSteps) {
-  const firstStep = steps[0];
-  const reportUrl = firstStep && firstStep.url ? firstStep.url : 'Unknown URL';
+async function generateTextReportForWord(steps, stats, readableSteps) {
+  const reportUrl = await getCurrentUrl();
   
   let text = '';
   
@@ -1468,17 +1632,17 @@ function generateStepsWithScreenshots(steps) {
  * Copy report to clipboard
  * Only includes UI interactions, excludes console and performance events
  */
-function copyReportToClipboard() {
+async function copyReportToClipboard() {
   const readableSteps = convertStepsToReadable(allSteps);
   const stats = calculateStats(allSteps);
   
-  // Generate title based on URL - use the first step's URL if available
+  // Generate title based on URL - use the current tracked URL
   let title = 'Bug Report';
-  const firstStep = allSteps.find(step => step.url);
-  if (firstStep && firstStep.url) {
+  const currentUrl = await getCurrentUrl();
+  if (currentUrl && currentUrl !== 'Unknown URL') {
     try {
-      const domain = new URL(firstStep.url).hostname;
-      const path = new URL(firstStep.url).pathname;
+      const domain = new URL(currentUrl).hostname;
+      const path = new URL(currentUrl).pathname;
       title = `Issue on ${domain}`;
       if (path && path !== '/') {
         const pathParts = path.split('/').filter(p => p);
@@ -1564,7 +1728,7 @@ function copyReportToClipboard() {
   
   // Actual Results
   text += `❌ Actual Results\n`;
-  const reportUrl = firstStep && firstStep.url ? firstStep.url : 'Unknown URL';
+  const reportUrl = currentUrl || 'Unknown URL';
   text += `URL: ${reportUrl}\n`;
   text += `Steps performed: ${stats.total} actions recorded\n`;
   text += `Details: See "Steps to Reproduce" section above for detailed actions\n\n`;
@@ -1844,8 +2008,9 @@ function loadScreenshotGallery() {
     return;
   }
   
-  // Filter out invalid screenshots and render valid ones
-  const validScreenshots = screenshots.filter((screenshot, index) => {
+  // Deduplicate screenshots first, then filter out invalid ones
+  const uniqueScreenshots = deduplicateScreenshots(screenshots);
+  const validScreenshots = uniqueScreenshots.filter((screenshot, index) => {
     if (!screenshot || !screenshot.dataURL) {
       console.warn('Invalid screenshot data at index:', index);
       return false;
@@ -1858,7 +2023,7 @@ function loadScreenshotGallery() {
     return;
   }
   
-  galleryGrid.innerHTML = screenshots.map((screenshot, index) => {
+  galleryGrid.innerHTML = validScreenshots.map((screenshot, index) => {
     // Skip invalid screenshots in rendering
     if (!screenshot || !screenshot.dataURL) {
       return '';
@@ -2046,14 +2211,21 @@ function deleteScreenshotByIndex(index) {
   status.style.color = '#f59e0b';
 }
 
-function clearAllScreenshots() {
+function clearAllScreenshots(skipConfirmation = false) {
   if (screenshots.length === 0) return;
   
-  if (confirm('Are you sure you want to delete all screenshots?')) {
-    screenshots = [];
-    saveScreenshots();
-    loadScreenshotGallery();
-    
+  if (!skipConfirmation && !confirm('Are you sure you want to delete all screenshots?')) {
+    return;
+  }
+  
+  screenshots = [];
+  saveScreenshots();
+  loadScreenshotGallery();
+  
+  // Reset report download tracker
+  reportDownloadTracker.reset();
+  
+  if (!skipConfirmation) {
     status.textContent = 'All screenshots cleared';
     status.style.color = '#f59e0b';
   }
@@ -2070,9 +2242,17 @@ async function saveScreenshots() {
 async function loadScreenshots() {
   try {
     const result = await chrome.storage.local.get(['screenshots']);
-    screenshots = result.screenshots || [];
-    console.log('Loaded screenshots from storage:', screenshots.length, 'screenshots');
+    const loadedScreenshots = result.screenshots || [];
+    // Deduplicate screenshots when loading from storage
+    screenshots = deduplicateScreenshots(loadedScreenshots);
+    console.log('Loaded screenshots from storage:', loadedScreenshots.length, 'screenshots');
+    console.log('After deduplication:', screenshots.length, 'unique screenshots');
     console.log('Screenshots data:', screenshots);
+    
+    // Save back deduplicated screenshots if any duplicates were removed
+    if (screenshots.length !== loadedScreenshots.length) {
+      await saveScreenshots();
+    }
   } catch (error) {
     console.error('Failed to load screenshots:', error);
     screenshots = [];
@@ -2901,10 +3081,8 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'Escape') {
     recordStep('keypress', e.target, 'Pressed Escape').catch(console.error);
   }
-  // Record Tab navigation
-  else if (e.key === 'Tab') {
-    recordStep('navigation', e.target, `Tab ${e.shiftKey ? 'backward' : 'forward'}`).catch(console.error);
-  }
+  // Tab navigation removed - this was causing random navigation steps
+  // Tab key should only be used for form navigation, not recorded as page navigation
   // Enter key screenshot handling removed - now handled by content script
   // to avoid duplicate screenshots
 }, true);

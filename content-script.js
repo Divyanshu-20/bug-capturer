@@ -305,14 +305,12 @@
     if (e.key === 'Enter' && ['input', 'textarea'].includes(e.target.tagName.toLowerCase())) {
       recordStep('keypress', e.target, 'Pressed Enter').catch(console.error);
     }
-    // Handle Enter key for screenshots when not in form elements
-    else if (e.key === 'Enter' && window.bcState.recording) {
-      // Don't trigger if user is typing in form elements
-      if (!['input', 'textarea', 'select'].includes(e.target.tagName.toLowerCase())) {
-        e.preventDefault();
-        
-        // Show toast notification
-        showToast('📸 Capturing screenshot...');
+    // Handle Alt+Ctrl+P key combination for screenshots
+    else if (e.altKey && e.ctrlKey && e.code === 'KeyP' && window.bcState.recording) {
+      e.preventDefault();
+      
+      // Show toast notification
+      showToast('📸 Capturing screenshot...');
         
         // Trigger screenshot capture via background script
         chrome.runtime.sendMessage({
@@ -349,7 +347,6 @@
           console.error('Screenshot capture failed:', error);
           showToast('❌ Screenshot capture failed');
         });
-      }
     }
     // Record Escape key presses
     else if (e.key === 'Escape') {
@@ -429,7 +426,7 @@
     } else if (window.bcState.recording) {
       indicator.innerHTML = `
         🔴 <span>Recording</span>
-        <div style="font-size: 9px; margin-top: 2px; opacity: 0.8;">Press Enter for screenshot</div>
+        <div style="font-size: 9px; margin-top: 2px; opacity: 0.8;">Press Alt+Ctrl+P for screenshot</div>
         <button id="pause-recording" style="
           margin-left: 8px;
           background: #dc3545;
@@ -792,22 +789,69 @@
 
   // Navigation tracking without automatic screenshots
   let navigationStartTime = null;
+  let lastNavigationUrl = window.location.href;
+
+  // Track URL changes for updating stored URL references
+  function updateCurrentUrl() {
+    const newUrl = window.location.href;
+    if (newUrl !== lastNavigationUrl) {
+      console.log('URL changed from', lastNavigationUrl, 'to', newUrl);
+      
+      // Update the cached URL in state
+      window.bcState.actualUrl = newUrl;
+      lastNavigationUrl = newUrl;
+      
+      // Notify background script of URL change
+      try {
+        chrome.runtime.sendMessage({
+          cmd: 'update-current-url',
+          url: newUrl
+        }).catch(err => console.warn('Failed to update current URL in background:', err));
+      } catch (error) {
+        console.warn('Error updating current URL:', error);
+      }
+      
+      // Record navigation step if recording
+      if (window.bcState.recording) {
+        recordStep('navigation', null, `Navigated to ${newUrl}`).catch(console.error);
+      }
+    }
+  }
 
   // Track navigation events without capturing screenshots automatically
   window.addEventListener('beforeunload', function(e) {
     if (window.bcState.recording) {
       console.log('Navigation detected, recording navigation step...');
       // Only record navigation step, no automatic screenshot
-      recordStep('navigation', null, 'Page navigation/redirect detected').catch(console.error);
+      const currentUrl = window.location.href;
+      recordStep('navigation', null, `Navigating away from ${currentUrl}`).catch(console.error);
     }
   });
 
   // Handle navigation completion
   window.addEventListener('load', function() {
-    if (window.bcState.recording) {
-      console.log('Navigation completed');
-    }
+    // Always update URL on load, regardless of recording state
+    updateCurrentUrl();
   });
+  
+  // Listen for popstate events (back/forward navigation)
+  window.addEventListener('popstate', function() {
+    // Update URL on popstate events
+    setTimeout(updateCurrentUrl, 100); // Small delay to ensure URL is updated
+  });
+  
+  // Monitor for URL changes in SPAs using MutationObserver
+  const urlObserver = new MutationObserver(() => {
+    updateCurrentUrl();
+  });
+  
+  // Start observing for URL changes
+  if (document.documentElement) {
+    urlObserver.observe(document, { subtree: true, childList: true });
+  }
+  
+  // Also check URL periodically for SPAs that don't trigger events
+  setInterval(updateCurrentUrl, 2000);
   
   // Keyboard shortcuts
   document.addEventListener('keydown', function(e) {
@@ -889,11 +933,17 @@
         return null;
       }
 
-      // Use html2canvas for better quality screenshots
+      // Use html2canvas for better quality screenshots with smart cropping
       const canvas = await html2canvas(document.body, {
         useCORS: true,
         allowTaint: false,
-        scale: 0.8,
+        scale: 1.0,
+        x: 0,
+        y: 0,
+        width: Math.min(window.innerWidth, document.documentElement.scrollWidth),
+        height: Math.min(window.innerHeight, document.documentElement.scrollHeight),
+        scrollX: 0,
+        scrollY: 0,
         ignoreElements: (element) => {
           // Ignore extension UI elements
           return element.classList && (
@@ -903,7 +953,7 @@
         }
       });
 
-      const screenshot = canvas.toDataURL('image/png', 0.8);
+      const screenshot = canvas.toDataURL('image/png', 0.9);
       
       console.log('Screenshot capture completed successfully');
       return screenshot;
@@ -1084,11 +1134,15 @@ function captureScreenshot(description = '') {
       html2canvas(document.body, {
         useCORS: true,
         allowTaint: true,
-        scale: 0.5,
-        width: window.innerWidth,
-        height: window.innerHeight
+        scale: 1.0,
+        x: 0,
+        y: 0,
+        width: Math.min(window.innerWidth, document.documentElement.scrollWidth),
+        height: Math.min(window.innerHeight, document.documentElement.scrollHeight),
+        scrollX: 0,
+        scrollY: 0
       }).then(canvas => {
-        const dataURL = canvas.toDataURL('image/png', 0.8);
+        const dataURL = canvas.toDataURL('image/png', 0.9);
         resolve({
           type: 'screenshot',
           description: description,

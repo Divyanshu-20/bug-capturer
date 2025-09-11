@@ -308,11 +308,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           
         case 'get-current-tab-url':
           try {
-            const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (activeTab && activeTab.url) {
-              sendResponse({ url: activeTab.url });
+            // First try to get the stored/tracked URL
+            let currentUrl = null;
+            
+            // Check if we have a stored URL from our tracking
+            const storedData = await chrome.storage.local.get(['bc_current_url', 'bc_last_tab_id']);
+            if (storedData.bc_current_url) {
+              currentUrl = storedData.bc_current_url;
+              console.log('Using tracked URL:', currentUrl);
+            }
+            
+            // Fallback to querying active tab if no stored URL
+            if (!currentUrl) {
+              const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+              if (activeTab && activeTab.url) {
+                currentUrl = activeTab.url;
+                console.log('Using active tab URL:', currentUrl);
+              }
+            }
+            
+            if (currentUrl) {
+              sendResponse({ url: currentUrl });
             } else {
-              sendResponse({ url: null, error: 'No active tab found' });
+              sendResponse({ url: null, error: 'No URL available' });
             }
           } catch (error) {
             console.error('Error getting current tab URL:', error);
@@ -320,6 +338,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           break;
           
+        case 'update-current-url':
+          try {
+            // Store the updated URL for the current session
+            if (message.url && sender.tab) {
+              console.log('Updating current URL to:', message.url, 'for tab:', sender.tab.id);
+              
+              // Update persistent state with latest URL
+              persistentState.currentUrl = message.url;
+              persistentState.lastUpdatedTabId = sender.tab.id;
+              
+              // Store in chrome storage for persistence
+              await chrome.storage.local.set({
+                'bc_current_url': message.url,
+                'bc_last_tab_id': sender.tab.id,
+                'bc_url_updated_at': Date.now()
+              });
+              
+              sendResponse({ ok: true, url: message.url });
+            } else {
+              sendResponse({ ok: false, error: 'Invalid URL or sender tab' });
+            }
+          } catch (error) {
+             console.error('Error updating current URL:', error);
+             sendResponse({ ok: false, error: error.message });
+           }
+           break;
+           
         case 'export-steps':
           const exportSteps = await getStoredSteps();
           if (exportSteps.length === 0) {
@@ -352,7 +397,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           
           // Generate Word document with embedded images
-          const rtfReport = generateRTFReport(downloadSteps);
+          const rtfReport = await generateRTFReport(downloadSteps);
           
           // Download the Word document (images are already embedded)
           downloadRTFDocument(rtfReport);
@@ -677,9 +722,16 @@ async function generateMarkdownReportWithAssets(steps) {
   const duration = Math.round((endTime - startTime) / 1000);
   
   // Get URL for title generation
-  const url = uiSteps[0]?.url || 'Unknown URL';
-  const domain = new URL(url).hostname;
-  const path = new URL(url).pathname;
+  const storedData = await chrome.storage.local.get(['bc_current_url']);
+  const url = storedData.bc_current_url || uiSteps[0]?.url || 'Unknown URL';
+  let domain, path;
+  try {
+    domain = new URL(url).hostname;
+    path = new URL(url).pathname;
+  } catch (e) {
+    domain = 'Unknown Domain';
+    path = '/';
+  }
   
   // Generate title based on URL
   let title = `Issue on ${domain}`;
@@ -789,7 +841,7 @@ async function generateMarkdownReportWithAssets(steps) {
         stepDescription = `User performed ${action} on ${target}.`;
     }
     
-    markdown += `${index + 1}. ${stepDescription}\n`;
+    markdown += `${stepDescription}\n`;
   });
   
   markdown += `\n## ✅ Expected Results\n\n`;
@@ -816,7 +868,7 @@ async function generateMarkdownReportWithAssets(steps) {
  * Generate Word document report from steps with embedded images
  * Only includes UI interactions, excludes console and performance events
  */
-function generateRTFReport(steps) {
+async function generateRTFReport(steps) {
   // Filter out console and performance events
   const uiSteps = steps.filter(step => 
     step.type !== 'console' && step.type !== 'performance'
@@ -839,9 +891,16 @@ No UI interaction steps recorded.\\par
   const duration = Math.round((endTime - startTime) / 1000);
   
   // Get URL for title generation
-  const url = uiSteps[0]?.url || 'Unknown URL';
-  const domain = new URL(url).hostname;
-  const path = new URL(url).pathname;
+  const storedData = await chrome.storage.local.get(['bc_current_url']);
+  const url = storedData.bc_current_url || uiSteps[0]?.url || 'Unknown URL';
+  let domain, path;
+  try {
+    domain = new URL(url).hostname;
+    path = new URL(url).pathname;
+  } catch (e) {
+    domain = 'Unknown Domain';
+    path = '/';
+  }
   
   // Generate title based on URL
   let title = `Issue on ${domain}`;

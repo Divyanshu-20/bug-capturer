@@ -82,10 +82,8 @@ class WordReportGenerator {
 
       // Extract steps to reproduce
       if (line.match(/^\d+\./)) {
-        stepCounter++;
         const stepText = line.replace(/^\d+\.\s*/, '');
         data.stepsToReproduce.push({
-          number: stepCounter,
           text: stepText,
           screenshots: []
         });
@@ -277,7 +275,7 @@ class WordReportGenerator {
     for (const step of bugData.stepsToReproduce) {
       children.push(
         new Paragraph({
-          text: `${step.number}. ${step.text}`,
+          text: step.text,
           spacing: { after: 120 }
         })
       );
@@ -287,13 +285,36 @@ class WordReportGenerator {
         try {
           const imageData = screenshot.data || screenshot.dataUrl;
           
+          // Calculate proper dimensions maintaining aspect ratio
+          const maxWidth = 600;
+          const maxHeight = 450;
+          let width = maxWidth;
+          let height = maxHeight;
+          
+          // If we have viewport info, calculate aspect ratio
+          if (screenshot.viewport) {
+            const [viewportWidth, viewportHeight] = screenshot.viewport.split('x').map(Number);
+            if (viewportWidth && viewportHeight) {
+              const aspectRatio = viewportWidth / viewportHeight;
+              if (aspectRatio > maxWidth / maxHeight) {
+                // Wide image - constrain by width
+                width = maxWidth;
+                height = Math.round(maxWidth / aspectRatio);
+              } else {
+                // Tall image - constrain by height
+                height = maxHeight;
+                width = Math.round(maxHeight * aspectRatio);
+              }
+            }
+          }
+          
           children.push(
             new Paragraph({
               children: [new ImageRun({
                 data: imageData,
                 transformation: {
-                  width: 600,
-                  height: 400
+                  width: width,
+                  height: height
                 }
               })],
               alignment: AlignmentType.CENTER,
@@ -373,13 +394,36 @@ class WordReportGenerator {
             throw new Error('No image data found in attachment');
           }
           
+          // Calculate proper dimensions maintaining aspect ratio
+          const maxWidth = 600;
+          const maxHeight = 450;
+          let width = maxWidth;
+          let height = maxHeight;
+          
+          // If we have viewport info, calculate aspect ratio
+          if (attachment.viewport) {
+            const [viewportWidth, viewportHeight] = attachment.viewport.split('x').map(Number);
+            if (viewportWidth && viewportHeight) {
+              const aspectRatio = viewportWidth / viewportHeight;
+              if (aspectRatio > maxWidth / maxHeight) {
+                // Wide image - constrain by width
+                width = maxWidth;
+                height = Math.round(maxWidth / aspectRatio);
+              } else {
+                // Tall image - constrain by height
+                height = maxHeight;
+                width = Math.round(maxHeight * aspectRatio);
+              }
+            }
+          }
+          
           children.push(
             new Paragraph({
               children: [new ImageRun({
                 data: imageData,
                 transformation: {
-                  width: 600,
-                  height: 400
+                  width: width,
+                  height: height
                 }
               })],
               alignment: AlignmentType.CENTER,
@@ -444,6 +488,31 @@ class WordReportGenerator {
   }
 
   /**
+   * Deduplicate screenshots based on dataURL or timestamp
+   * @param {Array} screenshots - Array of screenshot objects
+   * @returns {Array} Deduplicated screenshots
+   */
+  deduplicateScreenshots(screenshots) {
+    if (!screenshots || screenshots.length === 0) return [];
+    
+    const seen = new Set();
+    const uniqueScreenshots = [];
+    
+    screenshots.forEach(screenshot => {
+      // Use dataURL as primary identifier, fallback to timestamp + description
+      const identifier = screenshot.dataURL || screenshot.dataUrl || 
+                        `${screenshot.timestamp}_${screenshot.description || screenshot.filename || ''}`;
+      
+      if (!seen.has(identifier)) {
+        seen.add(identifier);
+        uniqueScreenshots.push(screenshot);
+      }
+    });
+    
+    return uniqueScreenshots;
+  }
+
+  /**
    * Main method to generate and save bug report
    * @param {string} rawBugText - Raw bug capture text
    * @param {Array} screenshots - Array of screenshot objects
@@ -452,8 +521,11 @@ class WordReportGenerator {
    */
   async generateBugReport(rawBugText, screenshots = [], metadata = {}, filename = 'bug-report.docx') {
     try {
+      // Deduplicate screenshots before processing
+      const uniqueScreenshots = this.deduplicateScreenshots(screenshots);
+      
       // Extract structured data
-      const bugData = this.extractBugData(rawBugText, screenshots, metadata);
+      const bugData = this.extractBugData(rawBugText, uniqueScreenshots, metadata);
       
       // Generate Word document
       const docBlob = await this.generateWordDocument(bugData);
@@ -477,8 +549,11 @@ class WordReportGenerator {
    */
   async generateTVDReport(rawBugText, screenshots = [], metadata = {}, filename = 'tvd-report.docx') {
     try {
+      // Deduplicate screenshots before processing
+      const uniqueScreenshots = this.deduplicateScreenshots(screenshots);
+      
       // Extract structured data
-      const bugData = this.extractTVDData(rawBugText, screenshots, metadata);
+      const bugData = this.extractTVDData(rawBugText, uniqueScreenshots, metadata);
       
       // Generate Word document with all screenshots
       const docBlob = await this.generateTVDWordDocument(bugData);
@@ -486,7 +561,7 @@ class WordReportGenerator {
       // Save document
       this.saveDocument(docBlob, filename);
       
-      return { success: true, message: `TVD report generated successfully with ${screenshots.length} screenshots` };
+      return { success: true, message: `TVD report generated successfully with ${uniqueScreenshots.length} screenshots` };
     } catch (error) {
       console.error('Failed to generate TVD report:', error);
       return { success: false, error: error.message };
@@ -667,13 +742,36 @@ class WordReportGenerator {
       try {
         const imageData = screenshot.data || screenshot.dataUrl;
         
+        // Calculate proper dimensions maintaining aspect ratio
+        const maxWidth = 600;
+        const maxHeight = 450;
+        let width = maxWidth;
+        let height = maxHeight;
+        
+        // If we have viewport info, calculate aspect ratio
+        if (screenshot.viewport) {
+          const [viewportWidth, viewportHeight] = screenshot.viewport.split('x').map(Number);
+          if (viewportWidth && viewportHeight) {
+            const aspectRatio = viewportWidth / viewportHeight;
+            if (aspectRatio > maxWidth / maxHeight) {
+              // Wide image - constrain by width
+              width = maxWidth;
+              height = Math.round(maxWidth / aspectRatio);
+            } else {
+              // Tall image - constrain by height
+              height = maxHeight;
+              width = Math.round(maxHeight * aspectRatio);
+            }
+          }
+        }
+        
         children.push(
           new Paragraph({
             children: [new ImageRun({
               data: imageData,
               transformation: {
-                width: 600,
-                height: 400
+                width: width,
+                height: height
               }
             })],
             alignment: AlignmentType.CENTER,

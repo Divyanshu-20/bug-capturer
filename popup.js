@@ -303,43 +303,46 @@ async function loadSteps(silent = false) {
  * Clear all stored steps
  */
 async function clearSteps(skipConfirmation = false) {
-  if (!skipConfirmation && !confirm('Clear all recorded steps? This cannot be undone.')) {
+  if (!skipConfirmation && !confirm('Clear all captured steps? This cannot be undone.')) {
     return;
   }
-  
+
   try {
-    if (clearBtn) clearBtn.disabled = true;
+    // Clear steps from storage
+    await chrome.runtime.sendMessage({ cmd: 'clear-steps' });
+    
+    // STOP RECORDING to prevent session restoration
+    await chrome.runtime.sendMessage({ 
+      cmd: 'update-recording-state', 
+      isRecording: false,
+      sessionId: null,
+      startTime: null
+    });
+    
+    // Clear local state
+    allSteps = [];
+    lastStepCount = 0;
+    
+    // Update UI
+    renderSteps([]);
+    
+    // Stop auto-refresh to prevent immediate reload
+    stopAutoRefresh();
+    
+    // Reset report download tracker
+    reportDownloadTracker.reset();
+    
+    // Clear search
+    if (searchBox) searchBox.value = '';
+    
     if (!skipConfirmation) {
-      status.textContent = 'Clearing...';
-      status.style.color = '#6b7280';
+      status.textContent = 'Steps cleared and recording stopped';
+      status.className = 'status success';
     }
     
-    const response = await chrome.runtime.sendMessage({ cmd: 'clear-steps' });
-    
-    if (response && response.ok) {
-      allSteps = [];
-      renderSteps();
-      // Also reload from storage to ensure sync
-      await loadSteps(true);
-      
-      // Reset report download tracker
-      reportDownloadTracker.reset();
-      
-      if (!skipConfirmation) {
-        status.textContent = 'Steps cleared successfully';
-        status.className = 'status success';
-      }
-      
-      // Clear search
-      if (searchBox) searchBox.value = '';
-    } else {
-      if (!skipConfirmation) {
-        status.textContent = 'Error clearing steps: ' + (response?.error || 'Unknown error');
-        status.className = 'status error';
-      }
-    }
+    console.log('Steps cleared and recording stopped');
   } catch (error) {
-    console.error('Clear steps error:', error);
+    console.error('Error clearing steps:', error);
     if (!skipConfirmation) {
       status.textContent = 'Failed to clear steps: ' + error.message;
       status.className = 'status error';
@@ -1376,6 +1379,9 @@ async function generateTVDReport() {
  * Generate professional Word document using client-side docx library
  */
 async function generateWordDocumentReport() {
+  const startTime = Date.now();
+  let timeoutId;
+  
   try {
     // Check if WordReportGenerator is available
     if (typeof WordReportGenerator === 'undefined') {
@@ -1383,13 +1389,40 @@ async function generateWordDocumentReport() {
       status.style.color = '#dc3545';
       return;
     }
+    
+    // Set a timeout for the entire operation (5 minutes)
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('Report generation timed out after 5 minutes'));
+      }, 5 * 60 * 1000);
+    });
+    
+    // Check memory before starting
+    if (performance.memory && performance.memory.usedJSHeapSize > 200 * 1024 * 1024) {
+      throw new Error('Insufficient memory available for report generation');
+    }
 
     const steps = allSteps;
-    const stats = calculateStats(steps);
-    const readableSteps = convertStepsToReadable(steps);
     
-    // Generate raw text report
-    const rawText = await generateTextReportForWord(steps, stats, readableSteps);
+    // Limit steps for memory safety
+    const limitedSteps = steps.length > 100 ? steps.slice(0, 100) : steps;
+    if (steps.length > 100) {
+      console.warn(`Limited steps from ${steps.length} to 100 for memory safety`);
+      status.textContent = `Processing ${limitedSteps.length} of ${steps.length} steps for memory optimization...`;
+      status.style.color = '#ffc107';
+    }
+    
+    const stats = calculateStats(limitedSteps);
+    const readableSteps = convertStepsToReadable(limitedSteps);
+    
+    // Generate raw text report with error handling
+    let rawText;
+    try {
+      rawText = await generateTextReportForWord(limitedSteps, stats, readableSteps);
+    } catch (textError) {
+      console.warn('Failed to generate detailed text report, using fallback:', textError);
+      rawText = `Bug Report\n\nSteps: ${limitedSteps.length}\nGenerated: ${new Date().toLocaleString()}`;
+    }
     
     // Prepare screenshots data and sort by timestamp (first at top, latest at bottom)
     const sortedScreenshots = screenshots.sort((a, b) => a.timestamp - b.timestamp);
@@ -1397,7 +1430,13 @@ async function generateWordDocumentReport() {
     // Deduplicate screenshots to ensure only unique ones are included
     const uniqueScreenshots = deduplicateScreenshots(sortedScreenshots);
     
-    const screenshotData = uniqueScreenshots.map((screenshot, index) => ({
+    // Limit screenshots for memory safety
+    const limitedScreenshots = uniqueScreenshots.length > 20 ? uniqueScreenshots.slice(0, 20) : uniqueScreenshots;
+    if (uniqueScreenshots.length > 20) {
+      console.warn(`Limited screenshots from ${uniqueScreenshots.length} to 20 for memory safety`);
+    }
+    
+    const screenshotData = limitedScreenshots.map((screenshot, index) => ({
       filename: `screenshot-${index + 1}.png`,
       dataUrl: screenshot.dataURL || screenshot.data,
       data: screenshot.dataURL || screenshot.data,
@@ -1409,33 +1448,89 @@ async function generateWordDocumentReport() {
     status.textContent = 'Generating Word document...';
     status.style.color = '#007cba';
 
-    // Initialize and use Word generator
+    // Initialize and use Word generator with timeout
     const wordGenerator = new WordReportGenerator();
-    await wordGenerator.initialize();
+    
+    try {
+      await Promise.race([
+        wordGenerator.initialize(),
+        timeoutPromise
+      ]);
+    } catch (initError) {
+      clearTimeout(timeoutId);
+      throw new Error(`Word generator initialization failed: ${initError.message}`);
+    }
     
     const filename = `bug-report-${new Date().toISOString().slice(0, 10)}.docx`;
     const currentUrl = await getCurrentUrl();
-    const result = await wordGenerator.generateBugReport(rawText, screenshotData, {
-      url: currentUrl,
-      browser: navigator.userAgent,
-      platform: navigator.platform,
-      timestamp: new Date().toISOString()
-    }, filename);
+    
+    // Generate report with timeout
+    const result = await Promise.race([
+      wordGenerator.generateBugReport(rawText, screenshotData, {
+        url: currentUrl,
+        browser: navigator.userAgent,
+        platform: navigator.platform,
+        timestamp: new Date().toISOString()
+      }, filename),
+      timeoutPromise
+    ]);
+    
+    clearTimeout(timeoutId);
 
     if (result.success) {
+      const duration = Date.now() - startTime;
+      console.log(`Word document generated successfully in ${duration}ms`);
       status.textContent = '✅ Word document generated and downloaded successfully!';
       status.className = 'status success';
       
       // Mark Word report as downloaded
       reportDownloadTracker.markReportDownloaded('word');
     } else {
-      status.textContent = `❌ Failed to generate Word report: ${result.error}`;
-      status.className = 'status error';
+      throw new Error(result.error || 'Unknown error during report generation');
     }
+    
   } catch (error) {
+    clearTimeout(timeoutId);
     console.error('Failed to generate Word document:', error);
-    status.textContent = `❌ Error generating Word document: ${error.message}`;
+    
+    // Provide specific error messages
+    let errorMessage = '❌ Failed to generate Word document. ';
+    if (error.message.includes('timeout')) {
+      errorMessage += 'The operation took too long. Try reducing the number of captured steps or screenshots.';
+    } else if (error.message.includes('memory') || error.message.includes('Memory')) {
+      errorMessage += 'Not enough memory available. Try closing other tabs or applications.';
+    } else if (error.message.includes('quota') || error.message.includes('storage')) {
+      errorMessage += 'Storage quota exceeded. Please clear some data.';
+    } else if (error.message.includes('initialization')) {
+      errorMessage += 'Failed to initialize Word generator. Please refresh and try again.';
+    } else {
+      errorMessage += `${error.message}. Please try again or contact support if the issue persists.`;
+    }
+    
+    status.textContent = errorMessage;
     status.className = 'status error';
+    
+    // Attempt cleanup
+    try {
+      if (window.gc) {
+        window.gc();
+        console.log('Triggered garbage collection after error');
+      }
+    } catch (gcError) {
+      console.warn('Could not trigger garbage collection:', gcError);
+    }
+    
+  } finally {
+    // Final cleanup
+    clearTimeout(timeoutId);
+    
+    // Reset status after a delay if it's still showing loading
+    setTimeout(() => {
+      if (status.textContent.includes('Generating')) {
+        status.textContent = 'Ready';
+        status.className = 'status';
+      }
+    }, 1000);
   }
 }
 
@@ -1810,13 +1905,13 @@ async function captureScreenshot() {
         loadSteps(true);
       }, 500);
     } else {
-      console.error('Screenshot capture failed:', response);
+
       const errorMsg = response?.error || 'Unknown error';
       status.textContent = `Failed to capture screenshot: ${errorMsg}`;
       status.style.color = '#dc3545';
     }
   } catch (error) {
-    console.error('Screenshot capture error:', error);
+
     status.textContent = 'Screenshot capture failed: ' + error.message;
     status.style.color = '#dc3545';
   }
@@ -1850,19 +1945,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-async function testBackgroundScript() {
-  try {
-    console.log('Testing background script connection...');
-    const response = await chrome.runtime.sendMessage({
-      cmd: 'test-message'
-    });
-    console.log('Background script test response:', JSON.stringify(response, null, 2));
-    return response;
-  } catch (error) {
-    console.error('Background script test failed:', error);
-    return null;
-  }
-}
+
 
 async function captureScreenshotAdvanced(type = 'fullpage') {
   console.log(`Capturing ${type} screenshot...`);
@@ -2561,7 +2644,7 @@ async function activateExtension() {
     try {
       await chrome.tabs.sendMessage(tab.id, { type: 'activate-extension' });
     } catch (error) {
-      console.log('Content script not found, injecting...');
+
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
@@ -2658,9 +2741,9 @@ async function deactivateExtension() {
         sessionId: null,
         startTime: null
       });
-      console.log('Extension deactivation state persisted');
+
     } catch (e) {
-      console.warn('Failed to persist deactivation state:', e);
+
     }
     
     // Generate and show final report before deactivation
@@ -3048,13 +3131,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     } else {
       // No valid state response
-      console.log('No valid state response, showing inactive state');
       status.textContent = 'Extension Inactive - Click Activate to Start';
       status.style.color = '#6c757d';
       await loadSteps();
     }
   } catch (error) {
-    console.error('Error checking persistent state:', error);
     status.textContent = 'Extension Inactive - Click Activate to Start';
     status.style.color = '#6c757d';
     await loadSteps();
@@ -3075,11 +3156,11 @@ document.addEventListener('keydown', function(e) {
   
   // Record Enter key presses in form elements
   if (e.key === 'Enter' && ['input', 'textarea'].includes(e.target.tagName.toLowerCase())) {
-    recordStep('keypress', e.target, 'Pressed Enter').catch(console.error);
+    recordStep('keypress', e.target, 'Pressed Enter').catch(() => {});
   }
   // Record Escape key presses
   else if (e.key === 'Escape') {
-    recordStep('keypress', e.target, 'Pressed Escape').catch(console.error);
+    recordStep('keypress', e.target, 'Pressed Escape').catch(() => {});
   }
   // Tab navigation removed - this was causing random navigation steps
   // Tab key should only be used for form navigation, not recorded as page navigation

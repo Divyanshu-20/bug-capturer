@@ -7,14 +7,26 @@ console.log('Background script loaded and running');
 
 // Storage key for master steps array
 const STORAGE_KEY = 'bc_steps_master';
+const MAX_STORAGE_SIZE = 50 * 1024 * 1024; // 50MB limit
+const MAX_STEPS = 1000; // Maximum number of steps to prevent memory issues
 
 /**
- * Get stored steps from chrome.storage.local
+ * Get stored steps from chrome.storage.local with size validation
  */
 async function getStoredSteps() {
   try {
     const result = await chrome.storage.local.get([STORAGE_KEY]);
-    return result[STORAGE_KEY] || [];
+    const steps = result[STORAGE_KEY] || [];
+    
+    // Check if we have too many steps and clean up if needed
+    if (steps.length > MAX_STEPS) {
+      console.warn(`Too many steps (${steps.length}), keeping only latest ${MAX_STEPS}`);
+      const trimmedSteps = steps.slice(-MAX_STEPS);
+      await storeSteps(trimmedSteps);
+      return trimmedSteps;
+    }
+    
+    return steps;
   } catch (error) {
     console.error('Failed to get stored steps:', error);
     return [];
@@ -22,14 +34,33 @@ async function getStoredSteps() {
 }
 
 /**
- * Store steps array to chrome.storage.local
+ * Store steps array to chrome.storage.local with size limits
  */
 async function storeSteps(steps) {
   try {
+    // Estimate storage size
+    const dataSize = JSON.stringify(steps).length;
+    
+    if (dataSize > MAX_STORAGE_SIZE) {
+      console.warn(`Data too large (${dataSize} bytes), compressing...`);
+      // Remove oldest steps to stay under limit
+      let trimmedSteps = steps;
+      while (JSON.stringify(trimmedSteps).length > MAX_STORAGE_SIZE && trimmedSteps.length > 10) {
+        trimmedSteps = trimmedSteps.slice(Math.floor(trimmedSteps.length * 0.1)); // Remove 10% from start
+      }
+      steps = trimmedSteps;
+    }
+    
     await chrome.storage.local.set({ [STORAGE_KEY]: steps });
+    console.log(`Stored ${steps.length} steps (${JSON.stringify(steps).length} bytes)`);
     return { ok: true };
   } catch (error) {
     console.error('Failed to store steps:', error);
+    // If storage fails, try to clear some space
+    if (error.message && error.message.includes('QUOTA_EXCEEDED')) {
+      console.warn('Storage quota exceeded, clearing old data...');
+      await clearSteps();
+    }
     return { ok: false, error: error.message };
   }
 }
@@ -39,6 +70,19 @@ async function storeSteps(steps) {
  */
 async function compressScreenshot(dataURL, quality = 0.7) {
   try {
+    // Check memory before starting compression
+    if (performance.memory && performance.memory.usedJSHeapSize > 200 * 1024 * 1024) {
+      console.warn('High memory usage, skipping compression');
+      return dataURL;
+    }
+    
+    // Estimate data size and skip if too large
+    const estimatedSize = dataURL.length * 0.75; // Rough estimate of decoded size
+    if (estimatedSize > 50 * 1024 * 1024) { // 50MB limit
+      console.warn('Image too large for compression, using original');
+      return dataURL;
+    }
+    
     // Convert data URL to blob
     const response = await fetch(dataURL);
     const blob = await response.blob();
@@ -46,11 +90,20 @@ async function compressScreenshot(dataURL, quality = 0.7) {
     // Create image bitmap
     const imageBitmap = await createImageBitmap(blob);
     
-    // Calculate new dimensions (max 1920x1080 for storage efficiency)
-    const maxWidth = 1920;
-    const maxHeight = 1080;
+    // Calculate new dimensions with more aggressive limits
+    const maxWidth = 1000; // Reduced from 1920
+    const maxHeight = 800; // Reduced from 1080
+    const maxPixels = 800000; // ~800k pixels max
     let { width, height } = imageBitmap;
     
+    // Check total pixel count first
+    if (width * height > maxPixels) {
+      const ratio = Math.sqrt(maxPixels / (width * height));
+      width = Math.floor(width * ratio);
+      height = Math.floor(height * ratio);
+    }
+    
+    // Also check individual dimensions
     if (width > maxWidth || height > maxHeight) {
       const ratio = Math.min(maxWidth / width, maxHeight / height);
       width = Math.floor(width * ratio);
@@ -68,16 +121,25 @@ async function compressScreenshot(dataURL, quality = 0.7) {
     // Draw resized image
     ctx.drawImage(imageBitmap, 0, 0, width, height);
     
-    // Convert to compressed blob
+    // Convert to compressed blob with adjusted quality for large images
+    const adjustedQuality = width * height > 500000 ? Math.min(quality, 0.5) : quality;
     const compressedBlob = await canvas.convertToBlob({ 
       type: 'image/jpeg', 
-      quality: quality 
+      quality: adjustedQuality 
     });
     
     // Convert back to data URL
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
+      reader.onload = () => {
+        // Calculate compression ratio
+        const originalSize = dataURL.length;
+        const compressedSize = reader.result.length;
+        const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
+        
+        console.log(`Screenshot compressed: ${originalSize} -> ${compressedSize} bytes (${compressionRatio}% reduction)`);
+        resolve(reader.result);
+      };
       reader.onerror = () => reject(new Error('Failed to convert compressed image to data URL'));
       reader.readAsDataURL(compressedBlob);
     });
@@ -89,11 +151,27 @@ async function compressScreenshot(dataURL, quality = 0.7) {
 }
 
 /**
- * Add a new step with improved deduplication
+ * Add a new step with improved deduplication and memory management
  * STORAGE BEHAVIOR: More accurate deduplication to prevent false positives
  */
 async function addStep(newStep) {
   const steps = await getStoredSteps();
+  
+  // Check memory limits before adding
+  if (steps.length >= MAX_STEPS) {
+    console.warn('Maximum steps reached, removing oldest step');
+    steps.shift(); // Remove oldest step
+  }
+  
+  // Compress screenshot if present
+  if (newStep.dataURL) {
+    try {
+      newStep.dataURL = await compressScreenshot(newStep.dataURL);
+    } catch (compressionError) {
+      console.warn('Screenshot compression failed, removing image:', compressionError);
+      delete newStep.dataURL; // Remove problematic image
+    }
+  }
   
   // Improved deduplication: only filter truly identical rapid-fire duplicates
   const now = newStep.time;
@@ -276,7 +354,21 @@ async function cropScreenshotToArea(dataURL, area) {
 /**
  * Handle messages from content scripts and popup
  */
+// Track active message handlers to prevent memory leaks
+const activeHandlers = new Set();
+
+// Cleanup function for removing stale handlers
+function cleanupHandlers() {
+  if (activeHandlers.size > 100) {
+    console.warn('Too many active handlers, clearing some...');
+    activeHandlers.clear();
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const handlerId = Date.now() + Math.random();
+  activeHandlers.add(handlerId);
+  
   console.log('Background script received message:', message.cmd, 'from sender:', sender);
   console.log('Full message object:', JSON.stringify(message, null, 2));
   
@@ -443,9 +535,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           
         case 'capture-screenshot':
         case 'capture-screenshot-pause':
-          // Capture screenshot of the current tab
+          // Capture screenshot of the current tab with memory management
           try {
             console.log('Screenshot capture request received:', message);
+            
+            // Check memory before capturing
+            if (performance.memory && performance.memory.usedJSHeapSize > 100 * 1024 * 1024) {
+              console.warn('High memory usage detected, skipping screenshot');
+              sendResponse({ ok: false, error: 'Memory limit reached' });
+              break;
+            }
             
             // Get the active tab since popup doesn't have sender.tab
             console.log('Querying for active tab...');
@@ -667,6 +766,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch (error) {
       console.error('Background script error:', error);
       sendResponse({ ok: false, error: error.message });
+    } finally {
+      // Cleanup handler reference
+      activeHandlers.delete(handlerId);
+      
+      // Periodic cleanup
+      if (Math.random() < 0.1) { // 10% chance
+        cleanupHandlers();
+      }
     }
   })();
   
@@ -1131,11 +1238,23 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 // Handle tab updates to maintain recording state across navigation
+// Throttle tab update events to prevent excessive processing
+let tabUpdateTimeout = null;
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && persistentState.isRecording) {
-    // Reduced delay for faster state restoration
-    setTimeout(async () => {
-      await restoreRecordingStateWithRetry(tabId, 3);
+    // Debounce rapid tab updates
+    if (tabUpdateTimeout) {
+      clearTimeout(tabUpdateTimeout);
+    }
+    
+    tabUpdateTimeout = setTimeout(async () => {
+      try {
+        // Reduced delay for faster state restoration
+        await restoreRecordingStateWithRetry(tabId, 3);
+      } catch (error) {
+        console.error('Error restoring recording state:', error);
+      }
+      tabUpdateTimeout = null;
     }, 300); // Reduced from 1000ms to 300ms
   }
 });

@@ -1696,38 +1696,7 @@
       background: #4b5563;
     }
 
-    /* Theme Toggle Button */
-    .theme-toggle {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      background: var(--bg-glass);
-      backdrop-filter: var(--backdrop-blur);
-      -webkit-backdrop-filter: var(--backdrop-blur);
-      border: 1px solid var(--border-primary);
-      color: var(--text-inverse);
-      padding: 8px;
-      border-radius: var(--radius-full);
-      cursor: pointer;
-      font-size: 16px;
-      width: 36px;
-      height: 36px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all var(--transition-normal);
-      box-shadow: var(--shadow-sm);
-    }
 
-    .theme-toggle:hover {
-      background: var(--bg-glass-hover);
-      transform: translateY(-2px) scale(1.1);
-      box-shadow: var(--shadow-md);
-    }
-
-    .theme-toggle:active {
-      transform: translateY(0) scale(0.95);
-    }
 
     /* Status Text Styling */
     .status {
@@ -1836,7 +1805,6 @@
   <div class="main-container">
     <div class="header">
       <h1>🐛 Bug Capturer</h1>
-      <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode">🌙</button>
     </div>
   
   <div class="security-note">
@@ -1935,29 +1903,10 @@
   <!-- Word Report Generator -->
   <script src="word-report-generator.js"></script>
   
-  <!-- Theme Toggle Script -->
+  <!-- Set Dark Theme -->
   <script>
-    // Theme toggle functionality
-    const themeToggle = document.getElementById('theme-toggle');
-    const body = document.body;
-    
-    // Load saved theme or default to light
-    const savedTheme = localStorage.getItem('bug-capturer-theme') || 'light';
-    body.setAttribute('data-theme', savedTheme);
-    updateThemeIcon(savedTheme);
-    
-    themeToggle.addEventListener('click', () => {
-      const currentTheme = body.getAttribute('data-theme');
-      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-      
-      body.setAttribute('data-theme', newTheme);
-      localStorage.setItem('bug-capturer-theme', newTheme);
-      updateThemeIcon(newTheme);
-    });
-    
-    function updateThemeIcon(theme) {
-      themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
-    }
+    // Set dark theme permanently
+    document.body.setAttribute('data-theme', 'dark');
   </script>
   
   <script src="popup.js"></script>

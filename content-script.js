@@ -790,12 +790,49 @@
   // Navigation tracking without automatic screenshots
   let navigationStartTime = null;
   let lastNavigationUrl = window.location.href;
+  
+  // Helper function to determine if URL change is significant enough to record as navigation
+  function isSignificantUrlChange(oldUrl, newUrl) {
+    if (!oldUrl || !newUrl) return true;
+    
+    try {
+      const oldUrlObj = new URL(oldUrl);
+      const newUrlObj = new URL(newUrl);
+      
+      // Different domains/origins are always significant
+      if (oldUrlObj.origin !== newUrlObj.origin) {
+        return true;
+      }
+      
+      // Different paths are significant
+      if (oldUrlObj.pathname !== newUrlObj.pathname) {
+        return true;
+      }
+      
+      // Different search params are significant
+      if (oldUrlObj.search !== newUrlObj.search) {
+        return true;
+      }
+      
+      // Only hash changes are not considered significant navigation
+      // (common in SPAs for in-page navigation)
+      return false;
+      
+    } catch (error) {
+      // If URL parsing fails, consider it significant to be safe
+      console.warn('Error parsing URLs for navigation check:', error);
+      return true;
+    }
+  }
 
   // Track URL changes for updating stored URL references
   function updateCurrentUrl() {
     const newUrl = window.location.href;
     if (newUrl !== lastNavigationUrl) {
       console.log('URL changed from', lastNavigationUrl, 'to', newUrl);
+      
+      // Check if this is a significant navigation (different domain/path, not just hash/query changes)
+      const isSignificantNavigation = isSignificantUrlChange(lastNavigationUrl, newUrl);
       
       // Update the cached URL in state
       window.bcState.actualUrl = newUrl;
@@ -811,8 +848,8 @@
         console.warn('Error updating current URL:', error);
       }
       
-      // Record navigation step if recording
-      if (window.bcState.recording) {
+      // Only record navigation step for significant changes and if recording
+      if (window.bcState.recording && isSignificantNavigation) {
         recordStep('navigation', null, `Navigated to ${newUrl}`).catch(console.error);
       }
     }
@@ -840,18 +877,26 @@
     setTimeout(updateCurrentUrl, 100); // Small delay to ensure URL is updated
   });
   
-  // Monitor for URL changes in SPAs using MutationObserver
+  // Monitor for URL changes in SPAs using MutationObserver (throttled)
+  let urlUpdateTimeout = null;
   const urlObserver = new MutationObserver(() => {
-    updateCurrentUrl();
+    // Throttle URL updates to prevent excessive checking
+    if (urlUpdateTimeout) {
+      clearTimeout(urlUpdateTimeout);
+    }
+    urlUpdateTimeout = setTimeout(updateCurrentUrl, 500);
   });
   
-  // Start observing for URL changes
+  // Start observing for URL changes (only major DOM changes)
   if (document.documentElement) {
-    urlObserver.observe(document, { subtree: true, childList: true });
+    urlObserver.observe(document, { 
+      subtree: false, 
+      childList: true,
+      attributes: false
+    });
   }
   
-  // Also check URL periodically for SPAs that don't trigger events
-  setInterval(updateCurrentUrl, 2000);
+  // Removed periodic URL checking to prevent false navigation records
   
   // Keyboard shortcuts
   document.addEventListener('keydown', function(e) {
@@ -924,43 +969,78 @@
     });
   }
 
-  // Enhanced screenshot functionality using html2canvas during pause
+  // Enhanced screenshot functionality using html2canvas during pause with memory optimization
   async function captureScreenshotPause() {
+    let canvas = null;
     try {
       if (typeof html2canvas === 'undefined') {
         console.warn('html2canvas not available, using fallback method');
-        // Fallback: return a basic screenshot info
         return null;
       }
 
-      // Use html2canvas for better quality screenshots with smart cropping
-      const canvas = await html2canvas(document.body, {
+      // Check memory before capturing
+      if (performance.memory && performance.memory.usedJSHeapSize > 150 * 1024 * 1024) {
+        console.warn('High memory usage detected, skipping html2canvas capture');
+        return null;
+      }
+
+      // Limit canvas size to prevent memory issues
+      const maxWidth = Math.min(1920, window.innerWidth, document.documentElement.scrollWidth);
+      const maxHeight = Math.min(1080, window.innerHeight, document.documentElement.scrollHeight);
+      
+      // Use html2canvas with optimized settings for memory efficiency
+      canvas = await html2canvas(document.body, {
         useCORS: true,
         allowTaint: false,
-        scale: 1.0,
+        scale: 0.8, // Reduced scale to save memory
         x: 0,
         y: 0,
-        width: Math.min(window.innerWidth, document.documentElement.scrollWidth),
-        height: Math.min(window.innerHeight, document.documentElement.scrollHeight),
+        width: maxWidth,
+        height: maxHeight,
         scrollX: 0,
         scrollY: 0,
+        backgroundColor: '#ffffff',
+        removeContainer: true, // Clean up temporary elements
         ignoreElements: (element) => {
-          // Ignore extension UI elements
-          return element.classList && (
-            element.classList.contains('bc-root') ||
-            element.classList.contains('bug-capturer-ui')
-          );
+          // Ignore extension UI elements and heavy content
+          if (element.classList) {
+            return element.classList.contains('bc-root') ||
+                   element.classList.contains('bug-capturer-ui') ||
+                   element.tagName === 'VIDEO' ||
+                   element.tagName === 'IFRAME';
+          }
+          return false;
         }
       });
 
-      const screenshot = canvas.toDataURL('image/png', 0.9);
+      // Convert to data URL with compression
+      const screenshot = canvas.toDataURL('image/jpeg', 0.7); // Use JPEG with compression
       
       console.log('Screenshot capture completed successfully');
       return screenshot;
     } catch (error) {
       console.error('Screenshot capture failed:', error);
-      // Return null to indicate failure
       return null;
+    } finally {
+      // Clean up canvas to free memory
+      if (canvas) {
+        try {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+          }
+          canvas.width = 0;
+          canvas.height = 0;
+          canvas = null;
+        } catch (cleanupError) {
+          console.warn('Canvas cleanup failed:', cleanupError);
+        }
+      }
+      
+      // Force garbage collection hint
+      if (window.gc) {
+        window.gc();
+      }
     }
   }
   
@@ -1347,9 +1427,14 @@ function recordStepWithScreenshot(stepData, takeScreenshot = false) {
   setupKeyboardShortcuts();
   
   /**
-   * Performance monitoring functionality
+   * Performance monitoring functionality with proper cleanup
    */
+  let performanceObservers = [];
+  
   function setupPerformanceMonitoring() {
+    // Clean up any existing observers first
+    cleanupPerformanceObservers();
+    
     // Monitor page load performance
     window.addEventListener('load', function() {
       setTimeout(() => {
@@ -1369,49 +1454,75 @@ function recordStepWithScreenshot(stepData, takeScreenshot = false) {
       }, 100);
     });
     
-    // Monitor resource loading
+    // Monitor resource loading with cleanup tracking
     if (window.PerformanceObserver) {
-      const resourceObserver = new PerformanceObserver((list) => {
-        if (!window.bcState.recording) return;
-        
-        list.getEntries().forEach(entry => {
-          if (entry.duration > 1000) { // Only log slow resources (>1s)
-            recordPerformanceStep('slow-resource', {
-              name: entry.name,
-              duration: Math.round(entry.duration),
-              type: entry.initiatorType
-            });
-          }
-        });
-      });
-      
       try {
+        const resourceObserver = new PerformanceObserver((list) => {
+          if (!window.bcState.recording) return;
+          
+          const entries = list.getEntries();
+          // Limit processing to prevent memory issues
+          const limitedEntries = entries.slice(0, 50);
+          
+          limitedEntries.forEach(entry => {
+            if (entry.duration > 1000) { // Only log slow resources (>1s)
+              recordPerformanceStep('slow-resource', {
+                name: entry.name.substring(0, 200), // Limit string length
+                duration: Math.round(entry.duration),
+                type: entry.initiatorType
+              });
+            }
+          });
+        });
+        
         resourceObserver.observe({ entryTypes: ['resource'] });
+        performanceObservers.push(resourceObserver);
       } catch (e) {
-        console.warn('Performance observer not supported:', e);
+        console.warn('Resource observer not supported:', e);
       }
     }
     
-    // Monitor long tasks
+    // Monitor long tasks with cleanup tracking
     if (window.PerformanceObserver) {
-      const longTaskObserver = new PerformanceObserver((list) => {
-        if (!window.bcState.recording) return;
-        
-        list.getEntries().forEach(entry => {
-          recordPerformanceStep('long-task', {
-            duration: Math.round(entry.duration),
-            startTime: Math.round(entry.startTime)
+      try {
+        const longTaskObserver = new PerformanceObserver((list) => {
+          if (!window.bcState.recording) return;
+          
+          const entries = list.getEntries();
+          // Limit processing to prevent memory issues
+          const limitedEntries = entries.slice(0, 20);
+          
+          limitedEntries.forEach(entry => {
+            recordPerformanceStep('long-task', {
+              duration: Math.round(entry.duration),
+              startTime: Math.round(entry.startTime)
+            });
           });
         });
-      });
-      
-      try {
+        
         longTaskObserver.observe({ entryTypes: ['longtask'] });
+        performanceObservers.push(longTaskObserver);
       } catch (e) {
         console.warn('Long task observer not supported:', e);
       }
     }
   }
+  
+  // Cleanup function for performance observers
+  function cleanupPerformanceObservers() {
+    performanceObservers.forEach(observer => {
+      try {
+        observer.disconnect();
+      } catch (e) {
+        console.warn('Error disconnecting observer:', e);
+      }
+    });
+    performanceObservers = [];
+  }
+  
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', cleanupPerformanceObservers);
+  window.addEventListener('pagehide', cleanupPerformanceObservers);
   
   /**
    * Record performance metrics as a step

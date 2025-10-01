@@ -37,6 +37,13 @@ class WordReportGenerator {
    * @returns {Object} Structured bug report data
    */
   extractBugData(rawText, screenshots = [], metadata = {}) {
+    // Limit text processing to prevent memory issues
+    const maxTextLength = 100000; // 100KB limit
+    if (rawText.length > maxTextLength) {
+      console.warn(`Text too long (${rawText.length}), truncating to ${maxTextLength}`);
+      rawText = rawText.substring(0, maxTextLength) + '\n[Content truncated due to size]';
+    }
+    
     const lines = rawText.split('\n');
     const data = {
       title: '',
@@ -50,7 +57,7 @@ class WordReportGenerator {
       attachments: [],
       reportedBy: `Bug Context Capturer - ${new Date().toLocaleString()}`,
       url: '',
-      screenshots: screenshots || []
+      screenshots: this.deduplicateScreenshots(screenshots || [])
     };
 
     let currentSection = '';
@@ -155,33 +162,64 @@ class WordReportGenerator {
   }
 
   /**
-   * Convert base64 image to buffer for docx
+   * Convert base64 image to buffer for docx with memory optimization
    * @param {string} base64Data - Base64 image data
    * @returns {Uint8Array} Image buffer
    */
-  base64ToBuffer(base64Data) {
+  async base64ToBuffer(base64Data) {
     // Validate input
     if (!base64Data || typeof base64Data !== 'string') {
       throw new Error('Invalid base64 data provided');
     }
     
+    // Check data size before processing
+    if (base64Data.length > 10 * 1024 * 1024) { // 10MB limit
+      console.warn('Image too large, skipping conversion');
+      return null;
+    }
+    
     // Remove data URL prefix if present
     const base64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
     const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+    
+    // Check decoded size
+    if (binaryString.length > 5 * 1024 * 1024) { // 5MB decoded limit
+      console.warn('Decoded image too large, skipping');
+      return null;
     }
+    
+    const bytes = new Uint8Array(binaryString.length);
+    
+    // Process in chunks to avoid blocking
+    const chunkSize = 1024 * 1024; // 1MB chunks
+    for (let i = 0; i < binaryString.length; i += chunkSize) {
+      const end = Math.min(i + chunkSize, binaryString.length);
+      for (let j = i; j < end; j++) {
+        bytes[j] = binaryString.charCodeAt(j);
+      }
+      
+      // Yield control periodically for large images
+      if (i > 0 && i % (chunkSize * 5) === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    
     return bytes;
   }
 
   /**
-   * Generate Word document from bug data
+   * Generate Word document from bug data with memory optimization
    * @param {Object} bugData - Structured bug report data
    * @returns {Promise<Blob>} Word document blob
    */
   async generateWordDocument(bugData) {
     await this.initialize();
+
+    // Check memory before starting
+    if (performance.memory && performance.memory.usedJSHeapSize > 300 * 1024 * 1024) {
+      console.warn('High memory usage detected, reducing document complexity');
+      bugData = this.optimizeBugDataForMemory(bugData);
+    }
 
     const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun } = this.docx;
 
@@ -488,19 +526,41 @@ class WordReportGenerator {
   }
 
   /**
-   * Deduplicate screenshots based on dataURL or timestamp
+   * Deduplicate screenshots based on dataURL or timestamp with memory limits
    * @param {Array} screenshots - Array of screenshot objects
    * @returns {Array} Deduplicated screenshots
    */
   deduplicateScreenshots(screenshots) {
     if (!screenshots || screenshots.length === 0) return [];
     
+    // Limit total screenshots to prevent memory issues
+    const maxScreenshots = 20;
+    let limitedScreenshots = screenshots;
+    
+    if (screenshots.length > maxScreenshots) {
+      console.warn(`Too many screenshots (${screenshots.length}), keeping only ${maxScreenshots}`);
+      // Keep first few and last few screenshots
+      const keepFirst = Math.floor(maxScreenshots * 0.6);
+      const keepLast = maxScreenshots - keepFirst;
+      limitedScreenshots = [
+        ...screenshots.slice(0, keepFirst),
+        ...screenshots.slice(-keepLast)
+      ];
+    }
+    
     const seen = new Set();
     const uniqueScreenshots = [];
     
-    screenshots.forEach(screenshot => {
+    limitedScreenshots.forEach(screenshot => {
+      // Skip if image is too large
+      const dataURL = screenshot.dataURL || screenshot.dataUrl || '';
+      if (dataURL.length > 5 * 1024 * 1024) {
+        console.warn('Screenshot too large, skipping');
+        return;
+      }
+      
       // Use dataURL as primary identifier, fallback to timestamp + description
-      const identifier = screenshot.dataURL || screenshot.dataUrl || 
+      const identifier = dataURL || 
                         `${screenshot.timestamp}_${screenshot.description || screenshot.filename || ''}`;
       
       if (!seen.has(identifier)) {
@@ -509,6 +569,7 @@ class WordReportGenerator {
       }
     });
     
+    console.log(`Deduplicated screenshots: ${screenshots.length} -> ${uniqueScreenshots.length}`);
     return uniqueScreenshots;
   }
 
@@ -611,25 +672,60 @@ class WordReportGenerator {
   }
 
   /**
+   * Optimize bug data for memory constraints
+   * @param {Object} bugData - Original bug data
+   * @returns {Object} Optimized bug data
+   */
+  optimizeBugDataForMemory(bugData) {
+    const optimized = { ...bugData };
+    
+    // Limit screenshots more aggressively
+    if (optimized.screenshots && optimized.screenshots.length > 10) {
+      console.warn('Reducing screenshots for memory optimization');
+      optimized.screenshots = optimized.screenshots.slice(0, 10);
+    }
+    
+    // Truncate long text fields
+    if (optimized.summary && optimized.summary.length > 5000) {
+      optimized.summary = optimized.summary.substring(0, 5000) + '... [truncated]';
+    }
+    
+    if (optimized.actualResult && optimized.actualResult.length > 10000) {
+      optimized.actualResult = optimized.actualResult.substring(0, 10000) + '... [truncated]';
+    }
+    
+    // Limit steps to reproduce
+    if (optimized.stepsToReproduce && optimized.stepsToReproduce.length > 20) {
+      optimized.stepsToReproduce = optimized.stepsToReproduce.slice(0, 20);
+    }
+    
+    return optimized;
+  }
+
+  /**
    * Calculate session duration from screenshots
    * @param {Array} screenshots - Array of screenshots
    * @returns {string} Formatted duration
    */
   calculateSessionDuration(screenshots) {
-    if (screenshots.length === 0) return 'Unknown';
+    if (!screenshots || screenshots.length < 2) return 'Unknown';
     
     const timestamps = screenshots
       .map(s => s.timestamp)
-      .filter(t => t)
+      .filter(t => t && !isNaN(t))
       .sort((a, b) => a - b);
     
     if (timestamps.length < 2) return 'Unknown';
     
-    const duration = timestamps[timestamps.length - 1] - timestamps[0];
-    const minutes = Math.floor(duration / 60000);
-    const seconds = Math.floor((duration % 60000) / 1000);
+    const durationMs = timestamps[timestamps.length - 1] - timestamps[0];
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
     
-    return `${minutes}m ${seconds}s`;
+    if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
   }
 
   /**

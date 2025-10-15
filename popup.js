@@ -1,3 +1,70 @@
+/**
+ * Get browser name and version from user agent
+ * @returns {string} Browser name and version (e.g., "Chrome 120.0.0.0")
+ */
+function getBrowserInfo() {
+  const userAgent = navigator.userAgent;
+  
+  // Simple, clean browser detection - check most specific first
+  
+  // Firefox
+  if (userAgent.includes('Firefox/')) {
+    const match = userAgent.match(/Firefox\/([0-9.]+)/);
+    return match ? `Firefox ${match[1]}` : 'Firefox';
+  }
+  
+  // Comet Browser - Check before other Chromium browsers
+  if (userAgent.includes('Comet/')) {
+    const match = userAgent.match(/Comet\/([0-9.]+)/);
+    return match ? `Comet ${match[1]}` : 'Comet';
+  }
+  
+  // Edge (Chromium-based)
+  if (userAgent.includes('Edg/')) {
+    const match = userAgent.match(/Edg\/([0-9.]+)/);
+    return match ? `Edge ${match[1]}` : 'Edge';
+  }
+  
+  // Opera
+  if (userAgent.includes('OPR/')) {
+    const match = userAgent.match(/OPR\/([0-9.]+)/);
+    return match ? `Opera ${match[1]}` : 'Opera';
+  }
+  
+  // Vivaldi
+  if (userAgent.includes('Vivaldi/')) {
+    const match = userAgent.match(/Vivaldi\/([0-9.]+)/);
+    return match ? `Vivaldi ${match[1]}` : 'Vivaldi';
+  }
+  
+  // Brave - Check for navigator.brave
+  if (navigator.brave && navigator.brave.isBrave) {
+    const match = userAgent.match(/Chrome\/([0-9.]+)/);
+    return match ? `Brave ${match[1]}` : 'Brave';
+  }
+  
+  // Safari (must be before Chrome check)
+  if (userAgent.includes('Safari/') && !userAgent.includes('Chrome/')) {
+    const match = userAgent.match(/Version\/([0-9.]+)/);
+    return match ? `Safari ${match[1]}` : 'Safari';
+  }
+  
+  // Chrome (check last since many browsers include Chrome in UA)
+  if (userAgent.includes('Chrome/')) {
+    const match = userAgent.match(/Chrome\/([0-9.]+)/);
+    return match ? `Chrome ${match[1]}` : 'Chrome';
+  }
+  
+  // Internet Explorer
+  if (userAgent.includes('MSIE') || userAgent.includes('Trident/')) {
+    const match = userAgent.match(/(?:MSIE |rv:)([0-9.]+)/);
+    return match ? `Internet Explorer ${match[1]}` : 'Internet Explorer';
+  }
+  
+  // Fallback
+  return 'Unknown Browser';
+}
+
 let allSteps = [];
 let lastStepCount = 0;
 let autoRefreshInterval = null;
@@ -22,14 +89,8 @@ let reportDownloadTracker = {
       this.tvdReportDownloaded = true;
     }
     
-    // Auto-clear data only when both reports are downloaded
-    if (this.shouldClearData()) {
-      setTimeout(() => {
-        clearSteps(true);
-        clearAllScreenshots(true);
-        this.reset(); // Reset tracker for next session
-      }, 1000);
-    }
+    // Note: Auto-cleanup is now handled by performPostDownloadCleanup()
+    // in the downloadBothReports function for immediate cleanup
   }
 };
 
@@ -65,10 +126,8 @@ async function getCurrentUrl() {
 
 // DOM elements
 const activateBtn = document.getElementById('activate-btn');
-const refreshBtn = document.getElementById('refresh-btn');
 const clearBtn = document.getElementById('clear-btn');
-const exportBtn = document.getElementById('export-btn');
-const tvdBtn = document.getElementById('tvd-btn');
+const downloadReportsBtn = document.getElementById('download-reports-btn');
 
 const stopBtn = document.getElementById('stop-btn');
 const toggleBtn = document.getElementById('toggle-btn');
@@ -259,7 +318,6 @@ async function loadSteps(silent = false) {
   
   try {
     if (!silent) {
-      refreshBtn.disabled = true;
       status.textContent = 'Loading...';
       showLoadingSkeleton();
     }
@@ -293,9 +351,7 @@ async function loadSteps(silent = false) {
       status.textContent = 'Failed to load steps: ' + error.message;
     }
   } finally {
-    if (!silent) {
-      refreshBtn.disabled = false;
-    }
+    // No additional cleanup needed for silent mode
   }
 }
 
@@ -460,7 +516,7 @@ Details: See "Steps to Reproduce" section above for detailed actions\\par
 {\\b\\fs26 🖥️ Environment}\\par
 \\par
 URL: ${currentUrl}\\par
-Browser: ${navigator.userAgent.split(' ')[0]}\\par
+Browser: ${getBrowserInfo()}\\par
 Platform: ${navigator.platform}\\par
 Generated: ${new Date().toLocaleString()}\\par
 Report Type: Bug Context Capturer\\par
@@ -498,7 +554,7 @@ async function generateComprehensiveReport() {
   // Get comprehensive metadata
   const metadata = {
     'URL': actualUrl,
-    'Browser': navigator.userAgent.split(' ')[0],
+    'Browser': getBrowserInfo(),
     'Platform': navigator.platform,
     'Language': navigator.language,
     'Screen': `${screen.width}x${screen.height}`,
@@ -1019,25 +1075,14 @@ function generateModalHTML(steps, metadata, stats, readableSteps) {
   const url = metadata.URL || 'Unknown URL';
   let title = 'Bug Report';
   try {
-    const domain = new URL(url).hostname;
-    const path = new URL(url).pathname;
-    title = `Issue on ${domain}`;
-    if (path && path !== '/') {
-      const pathParts = path.split('/').filter(p => p);
-      if (pathParts.length > 0) {
-        title += `/${pathParts[0]}`;
-        if (pathParts.length > 1) {
-          title += `/${pathParts[1]}`;
-        }
-      }
-    }
+    title = `Issue on ${url}`;
   } catch (e) {
     // If URL parsing fails, use default title
   }
   
   // Find screenshots in steps and deduplicate them
   const allScreenshots = steps.filter(step => step.type === 'screenshot' && step.dataURL);
-  const screenshots = deduplicateScreenshots(allScreenshots);
+  const stepScreenshots = deduplicateScreenshots(allScreenshots);
   
   // Create action summary for Actual Results
   const keyActions = steps.filter(step => 
@@ -1109,10 +1154,10 @@ function generateModalHTML(steps, metadata, stats, readableSteps) {
         </div>
       
         <!-- Defect Screenshot Section -->
-        ${screenshots.length > 0 ? `
+        ${stepScreenshots.length > 0 ? `
         <div style="margin-bottom: 32px;">
           <h3 style="margin: 0 0 20px 0; color: #ffffff !important; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">📸 Defect Screenshot</h3>
-          ${screenshots.map((screenshot, index) => {
+          ${stepScreenshots.map((screenshot, index) => {
             const filename = `screenshot${String(index + 1).padStart(2, '0')}.png`;
             return `
             <div style="margin-bottom: 20px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 12px; overflow: hidden; background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px);">
@@ -1298,6 +1343,101 @@ async function downloadWordDocumentReport() {
 
 
 
+
+/**
+ * Download both Word and TVD reports simultaneously
+ */
+async function downloadBothReports() {
+  try {
+    // IMMEDIATELY hide recording indicator on all tabs when button is clicked
+    try {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        try {
+          chrome.tabs.sendMessage(tab.id, { 
+            cmd: 'stop-recording-immediate',
+            hideIndicator: true 
+          }).catch(() => {}); // Ignore errors silently
+        } catch (tabError) {
+          // Ignore errors for tabs that don't have the content script
+        }
+      }
+    } catch (error) {
+      console.log('Error hiding indicators immediately:', error);
+    }
+
+    if (!isExtensionActive) {
+      status.textContent = 'Extension must be activated first';
+      status.className = 'status error';
+      return;
+    }
+
+    if (allSteps.length === 0) {
+      status.textContent = 'No steps to generate reports';
+      status.className = 'status error';
+      return;
+    }
+
+    // Show loading status
+    status.textContent = 'Generating both Word and TVD reports...';
+    status.style.color = '#f97316';
+
+    // Reset the download tracker to ensure proper clearing behavior
+    reportDownloadTracker.reset();
+
+    // Start both downloads simultaneously
+    const [wordResult, tvdResult] = await Promise.allSettled([
+      generateWordDocumentReport(),
+      generateTVDReport()
+    ]);
+
+    // Check results and provide feedback
+    let successCount = 0;
+    let errorMessages = [];
+
+    if (wordResult.status === 'fulfilled') {
+      successCount++;
+    } else {
+      errorMessages.push(`Word report: ${wordResult.reason?.message || 'Unknown error'}`);
+    }
+
+    if (tvdResult.status === 'fulfilled') {
+      successCount++;
+    } else {
+      errorMessages.push(`TVD report: ${tvdResult.reason?.message || 'Unknown error'}`);
+    }
+
+    // Update status based on results and trigger cleanup for successful downloads
+    if (successCount === 2) {
+      status.textContent = '✅ Both reports generated and downloaded successfully!';
+      status.className = 'status success';
+      
+      // Trigger immediate comprehensive cleanup after successful downloads
+      setTimeout(async () => {
+        await performPostDownloadCleanup();
+      }, 1500); // Short delay to let user see success message
+      
+    } else if (successCount === 1) {
+      status.textContent = `⚠️ One report generated successfully. Errors: ${errorMessages.join(', ')}`;
+      status.className = 'status warning';
+      
+      // Partial cleanup for partial success
+      setTimeout(async () => {
+        await performPostDownloadCleanup();
+      }, 2000);
+      
+    } else {
+      status.textContent = `❌ Failed to generate reports. Errors: ${errorMessages.join(', ')}`;
+      status.className = 'status error';
+      // No cleanup on complete failure
+    }
+
+  } catch (error) {
+    console.error('Failed to generate reports:', error);
+    status.textContent = `❌ Error generating reports: ${error.message}`;
+    status.className = 'status error';
+  }
+}
 
 /**
  * TVD - Capture all screenshots from session and generate Word document
@@ -1544,12 +1684,7 @@ async function generateTextReportForWord(steps, stats, readableSteps) {
   
   // Title
   if (reportUrl !== 'Unknown URL') {
-    try {
-      const urlObj = new URL(reportUrl);
-      text += `Issue on ${urlObj.hostname.replace('www.', '')}\n\n`;
-    } catch {
-      text += `Issue on ${reportUrl}\n\n`;
-    }
+    text += `Issue on ${reportUrl}\n\n`;
   } else {
     text += 'Bug Report\n\n';
   }
@@ -1586,7 +1721,7 @@ async function generateTextReportForWord(steps, stats, readableSteps) {
   // Environment
   text += `🖥️ Environment\n\n`;
   text += `- URL: ${reportUrl}\n`;
-  text += `- Browser: ${navigator.userAgent.split(' ')[0]}\n`;
+  text += `- Browser: ${getBrowserInfo()}\n`;
   text += `- Platform: ${navigator.platform}\n`;
   text += `- Language: ${navigator.language}\n`;
   text += `- Screen Resolution: ${screen.width}x${screen.height}\n`;
@@ -1735,22 +1870,7 @@ async function copyReportToClipboard() {
   let title = 'Bug Report';
   const currentUrl = await getCurrentUrl();
   if (currentUrl && currentUrl !== 'Unknown URL') {
-    try {
-      const domain = new URL(currentUrl).hostname;
-      const path = new URL(currentUrl).pathname;
-      title = `Issue on ${domain}`;
-      if (path && path !== '/') {
-        const pathParts = path.split('/').filter(p => p);
-        if (pathParts.length > 0) {
-          title += `/${pathParts[0]}`;
-          if (pathParts.length > 1) {
-            title += `/${pathParts[1]}`;
-          }
-        }
-      }
-    } catch (e) {
-      // If URL parsing fails, use default title
-    }
+    title = `Issue on ${currentUrl}`;
   }
   
   // Find screenshots in steps
@@ -1833,7 +1953,7 @@ async function copyReportToClipboard() {
   // Environment metadata
   text += `🖥️ Environment\n`;
   text += `URL: ${reportUrl}\n`;
-  text += `Browser: ${navigator.userAgent.split(' ')[0]}\n`;
+  text += `Browser: ${getBrowserInfo()}\n`;
   text += `Platform: ${navigator.platform}\n`;
   text += `Language: ${navigator.language}\n`;
   text += `Screen Resolution: ${screen.width}x${screen.height}\n`;
@@ -2611,19 +2731,11 @@ async function activateExtension() {
     activateBtn.className = 'deactivation-btn';
     
     // Enable all buttons
-    refreshBtn.disabled = false;
-    refreshBtn.classList.remove('disabled');
     clearBtn.disabled = false;
     clearBtn.classList.remove('disabled');
-    exportBtn.disabled = false;
-    exportBtn.classList.remove('disabled');
-    if (exportWordBtn) {
-      exportWordBtn.disabled = false;
-      exportWordBtn.classList.remove('disabled');
-    }
-    if (tvdBtn) {
-      tvdBtn.disabled = false;
-      tvdBtn.classList.remove('disabled');
+    if (downloadReportsBtn) {
+      downloadReportsBtn.disabled = false;
+      downloadReportsBtn.classList.remove('disabled');
     }
     toggleBtn.disabled = false;
     toggleBtn.classList.remove('disabled');
@@ -2704,15 +2816,11 @@ async function deactivateExtension() {
     activateBtn.className = 'activation-btn';
     
     // Disable all buttons
-    refreshBtn.disabled = true;
-    refreshBtn.classList.add('disabled');
     clearBtn.disabled = true;
     clearBtn.classList.add('disabled');
-    exportBtn.disabled = true;
-    exportBtn.classList.add('disabled');
-    if (tvdBtn) {
-      tvdBtn.disabled = true;
-      tvdBtn.classList.add('disabled');
+    if (downloadReportsBtn) {
+      downloadReportsBtn.disabled = true;
+      downloadReportsBtn.classList.add('disabled');
     }
     toggleBtn.disabled = true;
     toggleBtn.classList.add('disabled');
@@ -2807,24 +2915,13 @@ async function toggleExtensionActivation() {
 
 // Event listeners
 activateBtn.addEventListener('click', toggleExtensionActivation);
-refreshBtn.addEventListener('click', loadSteps);
 clearBtn.addEventListener('click', clearSteps);
-exportBtn.addEventListener('click', async () => {
-  await generateComprehensiveReport();
-});
 
 // Add Word document export functionality
-const exportWordBtn = document.getElementById('export-word-btn');
-if (exportWordBtn) {
-  exportWordBtn.addEventListener('click', async () => {
-    await generateWordDocumentReport();
-  });
-}
-
-// Add TVD button functionality
-if (tvdBtn) {
-  tvdBtn.addEventListener('click', async () => {
-    await generateTVDReport();
+// Add Download Reports button functionality
+if (downloadReportsBtn) {
+  downloadReportsBtn.addEventListener('click', async () => {
+    await downloadBothReports();
   });
 }
 
@@ -3061,19 +3158,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         activateBtn.className = 'deactivation-btn';
         
         // Enable all buttons
-        refreshBtn.disabled = false;
-        refreshBtn.classList.remove('disabled');
         clearBtn.disabled = false;
         clearBtn.classList.remove('disabled');
-        exportBtn.disabled = false;
-        exportBtn.classList.remove('disabled');
-        if (exportWordBtn) {
-          exportWordBtn.disabled = false;
-          exportWordBtn.classList.remove('disabled');
-        }
-        if (tvdBtn) {
-          tvdBtn.disabled = false;
-          tvdBtn.classList.remove('disabled');
+        if (downloadReportsBtn) {
+          downloadReportsBtn.disabled = false;
+          downloadReportsBtn.classList.remove('disabled');
         }
         toggleBtn.disabled = false;
         toggleBtn.classList.remove('disabled');
@@ -3141,6 +3230,145 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSteps();
   }
 });
+
+/**
+ * Comprehensive cleanup function that removes all temporary files and resets the interface
+ * This ensures a fresh start for the next operation after reports are downloaded
+ */
+async function performPostDownloadCleanup() {
+  try {
+    // Phase 1: Immediately hide recording indicator
+    status.textContent = '🧹 Stopping recording and hiding indicator...';
+    status.style.color = '#f97316';
+    
+    // Send immediate stop recording message to all content scripts
+    try {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, { 
+            cmd: 'stop-recording-immediate',
+            hideIndicator: true 
+          });
+        } catch (tabError) {
+          // Ignore errors for tabs that don't have the content script
+          console.log('Could not send stop message to tab:', tab.id);
+        }
+      }
+    } catch (error) {
+      console.log('Error sending stop messages to tabs:', error);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 100)); // Brief pause
+    
+    // Phase 2: Clear captured data
+    status.textContent = '🗑️ Clearing captured steps and recordings...';
+    await chrome.runtime.sendMessage({ cmd: 'clear-steps' });
+    await chrome.runtime.sendMessage({ 
+      cmd: 'update-recording-state', 
+      isRecording: false,
+      sessionId: null,
+      startTime: null
+    });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Phase 3: Clear screenshots and media
+    status.textContent = '📸 Removing screenshots and media files...';
+    screenshots = [];
+    await chrome.storage.local.set({ screenshots: [] });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Phase 4: Reset local state
+    status.textContent = '🔄 Resetting local state variables...';
+    allSteps = [];
+    lastStepCount = 0;
+    reportDownloadTracker.reset();
+    if (searchBox) searchBox.value = '';
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Phase 5: Clear storage and cache
+    status.textContent = '💾 Clearing storage and cached data...';
+    await chrome.storage.local.remove([
+      'bc_current_url',
+      'lastReport',
+      'reportGeneratedAt',
+      'bc_session_screenshots',
+      'bc_temp_data'
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Phase 6: Reset UI components
+    status.textContent = '🎨 Resetting user interface...';
+    stopAutoRefresh();
+    renderSteps([]);
+    loadScreenshotGallery();
+    
+    // Reset button states
+    if (clearBtn) clearBtn.disabled = true;
+    if (downloadReportsBtn) downloadReportsBtn.disabled = true;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Phase 7: Memory cleanup
+    status.textContent = '🧠 Performing memory cleanup...';
+    if (window.gc) {
+      window.gc();
+      console.log('Triggered garbage collection after cleanup');
+    }
+    
+    // Clear any temporary blob URLs
+    if (window.tempBlobUrls) {
+      window.tempBlobUrls.forEach(url => URL.revokeObjectURL(url));
+      window.tempBlobUrls = [];
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Final success message
+    status.textContent = '✅ Cleanup completed! Interface reset for next operation.';
+    status.className = 'status success';
+    
+    console.log('Post-download cleanup completed successfully');
+    
+    // Reset status after 4 seconds (longer to show completion)
+    setTimeout(() => {
+      status.textContent = 'Extension Inactive - Click Activate to Start';
+      status.style.color = '#6c757d';
+      status.className = 'status';
+    }, 4000);
+    
+  } catch (error) {
+    console.error('Error during post-download cleanup:', error);
+    
+    // Provide specific error feedback
+    if (error.message && error.message.includes('storage')) {
+      status.textContent = '⚠️ Cleanup completed with storage warnings. Interface reset.';
+    } else if (error.message && error.message.includes('runtime')) {
+      status.textContent = '⚠️ Cleanup completed with extension warnings. Interface reset.';
+    } else {
+      status.textContent = '⚠️ Cleanup completed with some warnings. Interface reset.';
+    }
+    
+    status.className = 'status warning';
+    
+    // Try to perform basic cleanup even if advanced cleanup failed
+    try {
+      allSteps = [];
+      screenshots = [];
+      reportDownloadTracker.reset();
+      if (clearBtn) clearBtn.disabled = true;
+      if (downloadReportsBtn) downloadReportsBtn.disabled = true;
+      console.log('Basic cleanup performed after error');
+    } catch (basicCleanupError) {
+      console.error('Even basic cleanup failed:', basicCleanupError);
+    }
+    
+    // Reset status after error (longer delay for warnings)
+    setTimeout(() => {
+      status.textContent = 'Extension Inactive - Click Activate to Start';
+      status.style.color = '#6c757d';
+      status.className = 'status';
+    }, 5000);
+  }
+}
 
 // Make functions global for onclick handlers
 window.viewScreenshot = viewScreenshot;

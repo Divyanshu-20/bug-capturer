@@ -425,8 +425,7 @@
       indicator.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
     } else if (window.bcState.recording) {
       indicator.innerHTML = `
-        🔴 <span>Recording</span>
-        <div style="font-size: 9px; margin-top: 2px; opacity: 0.8;">Press Alt+Ctrl+P for screenshot</div>
+        <span>Session On | Capture: Ctrl+Alt+P</span>
         <button id="pause-recording" style="
           margin-left: 8px;
           background: #dc3545;
@@ -640,11 +639,19 @@
       window.bcState.indicator = null;
     }
   }
+
+  /**
+   * Complete extension shutdown with full cleanup
+   */
+  function shutdownExtension() {
+    cleanupExtension();
+    // Additional shutdown-specific cleanup can be added here
+  }
   
   // Listen for messages from extension popup and other sources
   chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
     if (message.__bugCapturerStop) {
-      stopRecording();
+      shutdownExtension();
       sendResponse({ok: true});
     } else if (message.__bugCapturerToggle) {
       toggleRecording();
@@ -743,14 +750,7 @@
        }
        
        // Clean up extension components when deactivated
-       window.bcState.recording = false;
-       if (window.bcState.indicator) {
-         window.bcState.indicator.style.display = 'none';
-       }
-       if (window.bcState.errorObserver) {
-         window.bcState.errorObserver.disconnect();
-         window.bcState.errorObserver = null;
-       }
+       shutdownExtension();
        sendResponse({ ok: true, message: 'Extension deactivated' });
     } else if (message.type === 'restore-recording-state') {
       // Restore recording state after navigation
@@ -775,13 +775,21 @@
       // Start custom area selection from popup
       startCustomAreaSelection();
       sendResponse({ ok: true, message: 'Custom area selection started' });
+    } else if (message.cmd === 'stop-recording-immediate') {
+      // Immediately stop recording and hide indicator (for download reports)
+      window.bcState.recording = false;
+      if (window.bcState.indicator) {
+        window.bcState.indicator.style.display = 'none';
+        console.log('Recording indicator hidden immediately');
+      }
+      sendResponse({ ok: true, message: 'Recording stopped and indicator hidden' });
     }
   });
   
   // Listen for stop recording messages from window
   window.addEventListener('message', function(e) {
     if (e.data && e.data.__bugCapturerStop) {
-      stopRecording();
+      shutdownExtension();
     } else if (e.data && e.data.__bugCapturerToggle) {
       toggleRecording();
     }
@@ -2047,6 +2055,129 @@ function recordStepWithScreenshot(stepData, takeScreenshot = false) {
       showToast('Custom area capture failed: ' + error.message);
     }
   }
+
+  /**
+   * Comprehensive cleanup function to remove all extension elements and observers
+   */
+  function cleanupExtension() {
+    try {
+      // Remove the indicator element
+      if (window.bcState && window.bcState.indicator) {
+        window.bcState.indicator.remove();
+        window.bcState.indicator = null;
+      }
+      
+      // Disconnect error observer
+      if (window.bcState && window.bcState.errorObserver) {
+        window.bcState.errorObserver.disconnect();
+        window.bcState.errorObserver = null;
+      }
+      
+      // Clean up performance observers
+      cleanupPerformanceObservers();
+      
+      // Clear any input timers
+      inputTimers.clear();
+      
+      // Reset recording state
+      if (window.bcState) {
+        window.bcState.recording = false;
+        window.bcState.selectorMode = false;
+      }
+      
+      // Remove any extension-created elements with data-bc-ignore attribute
+      const extensionElements = document.querySelectorAll('[data-bc-ignore]');
+      extensionElements.forEach(element => {
+        try {
+          element.remove();
+        } catch (e) {
+          console.warn('Failed to remove extension element:', e);
+        }
+      });
+      
+      console.log('Bug Capturer Extension: Cleanup completed');
+    } catch (error) {
+      console.warn('Bug Capturer Extension: Error during cleanup:', error);
+    }
+  }
+
+  /**
+   * Enhanced cleanup for extension context invalidation
+   */
+  function handleExtensionContextInvalidation() {
+    console.warn('Bug Capturer Extension: Context invalidated, performing cleanup');
+    cleanupExtension();
+    
+    // Remove event listeners to prevent further execution
+    try {
+      document.removeEventListener('click', arguments.callee, true);
+      document.removeEventListener('input', arguments.callee, true);
+      document.removeEventListener('change', arguments.callee, true);
+      document.removeEventListener('submit', arguments.callee, true);
+    } catch (e) {
+      // Event listeners might not be removable in this way, but we try
+    }
+  }
+
+  // Add cleanup event listeners for various scenarios
+  
+  // 1. Page unload/navigation cleanup
+  window.addEventListener('beforeunload', cleanupExtension);
+  window.addEventListener('pagehide', cleanupExtension);
+  window.addEventListener('unload', cleanupExtension);
+  
+  // 2. Extension context invalidation detection
+  // Monitor chrome.runtime for context invalidation
+  if (chrome && chrome.runtime) {
+    // Test connection periodically and cleanup if context is invalid
+    const contextCheckInterval = setInterval(() => {
+      try {
+        // Try to access chrome.runtime.id - this will throw if context is invalid
+        if (!chrome.runtime.id) {
+          handleExtensionContextInvalidation();
+          clearInterval(contextCheckInterval);
+        }
+      } catch (error) {
+        // Context is invalid
+        handleExtensionContextInvalidation();
+        clearInterval(contextCheckInterval);
+      }
+    }, 5000); // Check every 5 seconds
+    
+    // Also check when trying to send messages
+    const originalSendMessage = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = function(...args) {
+      try {
+        return originalSendMessage.apply(this, args);
+      } catch (error) {
+        if (error.message && error.message.includes('Extension context invalidated')) {
+          handleExtensionContextInvalidation();
+        }
+        throw error;
+      }
+    };
+  }
+  
+  // 3. Document visibility change cleanup (when tab becomes hidden for extended periods)
+  let hiddenStartTime = null;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      hiddenStartTime = Date.now();
+    } else {
+      hiddenStartTime = null;
+    }
+  });
+  
+  // Check if tab has been hidden for too long (might indicate extension issues)
+  setInterval(() => {
+    if (hiddenStartTime && (Date.now() - hiddenStartTime > 300000)) { // 5 minutes
+      console.log('Bug Capturer Extension: Tab hidden for extended period, checking extension state');
+      // Don't cleanup automatically, but ensure indicator is properly managed
+      if (window.bcState && window.bcState.indicator && !window.bcState.recording) {
+        window.bcState.indicator.style.display = 'none';
+      }
+    }
+  }, 60000); // Check every minute
 
   console.log('Bug Capturer Extension: Content script loaded');
 })();

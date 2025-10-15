@@ -395,6 +395,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'clear-steps':
         case 'clear-all':
           const clearResult = await clearSteps();
+          
+          // Enhanced cleanup: also clear temporary data and cached URLs
+          try {
+            await chrome.storage.local.remove([
+              'bc_current_url',
+              'lastReport',
+              'reportGeneratedAt',
+              'bc_session_screenshots',
+              'bc_temp_data',
+              'bc_last_tab_id',
+              'screenshots'
+            ]);
+            console.log('Comprehensive cleanup completed in background script');
+          } catch (cleanupError) {
+            console.warn('Some cleanup operations failed:', cleanupError);
+          }
+          
           sendResponse(clearResult);
           break;
           
@@ -704,27 +721,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Save screenshots array
             await chrome.storage.local.set({ screenshots: screenshots });
             
-            // Also store as a step in the main steps array
-            const screenshotStep = {
-              type: 'screenshot',
-              time: message.screenshot.timestamp,
-              description: message.screenshot.description || `Custom area screenshot (${message.screenshot.area.width}x${message.screenshot.area.height})`,
-              dataURL: compressedDataURL,
-              timestamp: message.screenshot.timestamp,
-              url: message.screenshot.url,
-              viewport: message.screenshot.viewport,
-              area: message.screenshot.area,
-              sessionId: persistentState.sessionId,
-              meta: {
-                action: 'screenshot-custom',
-                timestamp: message.screenshot.timestamp - (persistentState.startTime || message.screenshot.timestamp)
-              }
-            };
+            // Note: Custom screenshots are only stored in the screenshots array for gallery display
+            // They are NOT stored as steps to avoid duplication in report previews
             
-            // Store the screenshot step
-            await addStep(screenshotStep);
-            
-            console.log('Custom screenshot stored in both screenshots array and steps. Total screenshots:', screenshots.length);
+            console.log('Custom screenshot stored in screenshots array for gallery. Total screenshots:', screenshots.length);
             sendResponse({ ok: true });
           } catch (error) {
             console.error('Failed to store custom screenshot:', error);
@@ -831,26 +831,9 @@ async function generateMarkdownReportWithAssets(steps) {
   // Get URL for title generation
   const storedData = await chrome.storage.local.get(['bc_current_url']);
   const url = storedData.bc_current_url || uiSteps[0]?.url || 'Unknown URL';
-  let domain, path;
-  try {
-    domain = new URL(url).hostname;
-    path = new URL(url).pathname;
-  } catch (e) {
-    domain = 'Unknown Domain';
-    path = '/';
-  }
   
   // Generate title based on URL
-  let title = `Issue on ${domain}`;
-  if (path && path !== '/') {
-    const pathParts = path.split('/').filter(p => p);
-    if (pathParts.length > 0) {
-      title += `/${pathParts[0]}`;
-      if (pathParts.length > 1) {
-        title += `/${pathParts[1]}`;
-      }
-    }
-  }
+  let title = `Issue on ${url}`;
   
   // Find screenshots in steps
   const screenshots = uiSteps.filter(step => step.type === 'screenshot' && step.dataURL);
@@ -1000,26 +983,9 @@ No UI interaction steps recorded.\\par
   // Get URL for title generation
   const storedData = await chrome.storage.local.get(['bc_current_url']);
   const url = storedData.bc_current_url || uiSteps[0]?.url || 'Unknown URL';
-  let domain, path;
-  try {
-    domain = new URL(url).hostname;
-    path = new URL(url).pathname;
-  } catch (e) {
-    domain = 'Unknown Domain';
-    path = '/';
-  }
   
   // Generate title based on URL
-  let title = `Issue on ${domain}`;
-  if (path && path !== '/') {
-    const pathParts = path.split('/').filter(p => p);
-    if (pathParts.length > 0) {
-      title += `/${pathParts[0]}`;
-      if (pathParts.length > 1) {
-        title += `/${pathParts[1]}`;
-      }
-    }
-  }
+  let title = `Issue on ${url}`;
   
   // Find screenshots in steps
   const screenshots = uiSteps.filter(step => step.type === 'screenshot' && step.dataURL);

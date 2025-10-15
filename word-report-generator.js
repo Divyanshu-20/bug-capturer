@@ -69,7 +69,7 @@ class WordReportGenerator {
       // Extract title from first meaningful line or URL
       if (!data.title && line && !line.startsWith('📊') && !line.startsWith('#')) {
         if (line.includes('http')) {
-          data.title = `Issue on ${this.extractDomainFromUrl(line)}`;
+          data.title = `Issue on ${line}`;
           data.url = line;
         } else if (line.length > 5) {
           data.title = line;
@@ -104,7 +104,7 @@ class WordReportGenerator {
 
     // Set default title if not found
     if (!data.title) {
-      data.title = data.url ? `Issue on ${this.extractDomainFromUrl(data.url)}` : 'Bug Report';
+      data.title = data.url ? `Issue on ${data.url}` : 'Bug Report';
     }
 
     // Map screenshots to steps
